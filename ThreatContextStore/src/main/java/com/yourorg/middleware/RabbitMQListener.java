@@ -22,6 +22,7 @@ public class RabbitMQListener {
     private final WazuhAlertDao dao;
     private Connection connection;
     private Channel channel;
+    private int messageCounter = 0;
 
     public RabbitMQListener() {
         this.dao = new WazuhAlertDao();
@@ -44,44 +45,76 @@ public class RabbitMQListener {
         channel.queueDeclare(QUEUE_NAME, true, false, false, null);
         channel.queueDeclare(QUERY_RESPONSE_QUEUE, true, false, false, null);
         
-        // Set prefetch to process one message at a time
-        channel.basicQos(1);
+        // Set prefetch to allow processing multiple messages concurrently
+        // This prevents one failed message from blocking all others
+        channel.basicQos(10);
 
         System.out.println("✅ Connected to RabbitMQ at " + RABBITMQ_HOST);
         System.out.println("⏳ Waiting for messages from queue: " + QUEUE_NAME);
         System.out.println("   Press CTRL+C to exit.\n");
 
         DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+            messageCounter++;
+            long deliveryTag = delivery.getEnvelope().getDeliveryTag();
+            boolean redelivered = delivery.getEnvelope().isRedeliver();
+            
+            System.out.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            System.out.println("📨 Message #" + messageCounter + " received (deliveryTag=" + deliveryTag + ", redelivered=" + redelivered + ")");
+            
             try {
                 String message = new String(delivery.getBody(), "UTF-8");
+                System.out.println("📄 Raw message length: " + message.length() + " bytes");
+                
                 JSONObject json = new JSONObject(message);
-
-                // Route based on message_type
+                String eventId = json.optString("event_id", "unknown");
                 String messageType = json.optString("message_type", "alert");
+                
+                System.out.println("🏷️  Event ID: " + eventId);
+                System.out.println("🔖 Message Type: " + messageType);
                 
                 switch (messageType) {
                     case "alert":
+                        System.out.println("➡️  Routing to: handleAlert()");
                         handleAlert(json);
                         break;
                     case "query":
+                        System.out.println("➡️  Routing to: handleQuery()");
                         handleQuery(json);
                         break;
                     case "query_response":
+                        System.out.println("➡️  Routing to: handleQueryResponse()");
                         handleQueryResponse(json);
                         break;
                     default:
-                        System.err.println("⚠ Unknown message_type: " + messageType);
+                        System.err.println("⚠️  Unknown message_type: " + messageType);
                 }
                 
                 // Acknowledge message
-                channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
+                channel.basicAck(deliveryTag, false);
+                System.out.println("✅ ACK sent for message #" + messageCounter + " (deliveryTag=" + deliveryTag + ")");
+                System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
                 
             } catch (Exception e) {
-                System.err.println("❌ Failed to process message:");
+                System.err.println("\n❌❌❌ EXCEPTION in message #" + messageCounter + " ❌❌❌");
+                System.err.println("Error message: " + e.getMessage());
+                System.err.println("Exception type: " + e.getClass().getName());
+                System.err.println("\nFull stack trace:");
                 e.printStackTrace();
                 
-                // Negative acknowledge - requeue the message
-                channel.basicNack(delivery.getEnvelope().getDeliveryTag(), false, true);
+                if (redelivered) {
+                    // Message already failed once - don't requeue again to avoid infinite loop
+                    System.err.println("\n⚠️  This message ALREADY FAILED ONCE (redelivered=true)");
+                    System.err.println("⚠️  DISCARDING message #" + messageCounter + " (deliveryTag=" + deliveryTag + ") to prevent infinite loop");
+                    channel.basicNack(deliveryTag, false, false);
+                    System.err.println("🗑️  NACK sent (requeue=false) - message discarded");
+                } else {
+                    // First failure - give it one more try by requeuing
+                    System.err.println("\n⚠️  This is the FIRST FAILURE (redelivered=false)");
+                    System.err.println("⚠️  REQUEUING message #" + messageCounter + " (deliveryTag=" + deliveryTag + ") for one retry");
+                    channel.basicNack(deliveryTag, false, true);
+                    System.err.println("🔄 NACK sent (requeue=true) - message will be retried");
+                }
+                System.err.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
             }
         };
 
@@ -98,10 +131,13 @@ public class RabbitMQListener {
      * Handle alert message: store in database
      */
     private void handleAlert(JSONObject alert) throws Exception {
+        System.out.println("   🔄 Calling dao.insertMessage()...");
         dao.insertMessage(alert);
+        System.out.println("   ✓ Database insert successful");
+        
         JSONObject payload = alert.optJSONObject("payload");
         String severity = payload != null ? payload.optString("severity", "unknown") : "unknown";
-        System.out.println("🔥 Stored alert: " + alert.optString("event_id") + " | Severity: " + severity);
+        System.out.println("   🔥 Alert stored successfully | Event ID: " + alert.optString("event_id") + " | Severity: " + severity);
     }
 
     /**
