@@ -1,0 +1,1478 @@
+# ============================================================================
+# COMPREHENSIVE SECURITY WORKFLOW COLLECTION
+# Version: 1.0
+# Description: 30 security workflows for ransomware detection and response
+# ============================================================================
+
+workflows:
+  # ==========================================================================
+  # WORKFLOW 1: High-Severity Shell Execution Detection and Quarantine
+  # ==========================================================================
+  - name: "High-Severity Shell Execution Detection and Quarantine"
+    version: 1.0
+    description: >
+      This workflow triggers on high-severity shell command execution alerts from Wazuh
+      with threat scores above 70. It immediately quarantines the compromised host via
+      OpenDaylight SDN controller to prevent ransomware propagation and lateral movement.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.severity == 'high' and trigger.payload.signature == 'Shell command execution' and trigger.payload.threat_score >= 70 }}"
+    
+    steps:
+      - name: "Log Critical Security Event"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "CRITICAL_SECURITY_EVENT"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              alert_type: "{{ trigger.payload.alert_type }}"
+              signature: "{{ trigger.payload.signature }}"
+              signature_id: "{{ trigger.payload.signature_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              process: "{{ trigger.payload.process }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              matched_rule: "{{ trigger.payload.matched_rule }}"
+              timestamp: "{{ trigger.timestamp }}"
+              severity_level: "critical"
+      
+      - name: "Immediate Host Quarantine via OpenDaylight"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "QUARANTINE"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              justification: >
+                Critical shell command execution detected on {{ trigger.payload.host_id }}.
+                Threat Score: {{ trigger.payload.threat_score }}/100.
+                Signature ID: {{ trigger.payload.signature_id }}.
+                Malicious process {{ trigger.payload.process }} attempting execution.
+                Rule {{ trigger.payload.matched_rule }} matched.
+                Immediate quarantine required to prevent ransomware spread.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Alert Security Operations Center"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SOC_ALERT"
+            data:
+              alert_level: "critical"
+              incident_type: "shell_execution_ransomware"
+              affected_host: "{{ trigger.payload.source_ip }}"
+              host_identifier: "{{ trigger.payload.host_id }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              action_taken: "HOST_QUARANTINED"
+              requires_investigation: true
+              message: >
+                CRITICAL: Shell command execution with threat score {{ trigger.payload.threat_score }}
+                detected on {{ trigger.payload.host_id }} ({{ trigger.payload.source_ip }}).
+                Host has been automatically quarantined. Immediate investigation required.
+
+  # ==========================================================================
+  # WORKFLOW 2: Data Exfiltration Detection and Network Isolation
+  # ==========================================================================
+  - name: "Data Exfiltration Detection and Network Isolation"
+    version: 1.0
+    description: >
+      This workflow triggers on data exfiltration alerts from Wazuh with high or medium severity.
+      It monitors for suspicious data transfers, logs the event, and implements network isolation
+      to prevent further data loss. Suitable for ransomware scenarios where data is being stolen
+      before encryption.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.alert_type == 'data_exfiltration' and (trigger.payload.severity == 'high' or trigger.payload.severity == 'medium') and trigger.payload.threat_score >= 50 }}"
+    
+    steps:
+      - name: "Log Data Exfiltration Attempt"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "DATA_EXFILTRATION_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              process: "{{ trigger.payload.process }}"
+              signature: "{{ trigger.payload.signature }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Block Outbound Traffic from Compromised Host"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "BLOCK_OUTBOUND"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              justification: >
+                Data exfiltration attempt detected from {{ trigger.payload.host_id }}.
+                Suspicious {{ trigger.payload.protocol }} traffic to {{ trigger.payload.destination_ip }}.
+                File involved: {{ trigger.payload.file_path }}.
+                Process: {{ trigger.payload.process }}.
+                Blocking outbound traffic to prevent data loss.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Isolate Host if High Severity"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "QUARANTINE"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              justification: >
+                Full network isolation initiated for {{ trigger.payload.host_id }}
+                due to active data exfiltration. Threat score: {{ trigger.payload.threat_score }}.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Notify Data Protection Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "data_exfiltration_blocked"
+              severity: "{{ trigger.payload.severity }}"
+              message: >
+                Data exfiltration blocked from {{ trigger.payload.host_id }} ({{ trigger.payload.source_ip }})
+                to {{ trigger.payload.destination_ip }}. Host has been isolated.
+                Compromised file: {{ trigger.payload.file_path }}.
+              priority: "urgent"
+              requires_forensics: true
+
+  # ==========================================================================
+  # WORKFLOW 3: Brute Force Attack Detection and Source Blocking
+  # ==========================================================================
+  - name: "Brute Force Attack Detection and Source Blocking"
+    version: 1.0
+    description: >
+      This workflow triggers on brute force attack alerts from Wazuh with high severity
+      and significant threat scores. It blocks the attacking source IP and quarantines
+      the targeted host to prevent credential compromise and subsequent ransomware deployment.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.alert_type == 'brute_force_attack' and trigger.payload.severity == 'high' and trigger.payload.threat_score >= 60 }}"
+    
+    steps:
+      - name: "Log Brute Force Attack"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "BRUTE_FORCE_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              attacker_ip: "{{ trigger.payload.source_ip }}"
+              target_host: "{{ trigger.payload.host_id }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              signature: "{{ trigger.payload.signature }}"
+              matched_rule: "{{ trigger.payload.matched_rule }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Block Attacker Source IP"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              action: "BLOCK_SOURCE"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              block_type: "permanent"
+              justification: >
+                Blocking source IP {{ trigger.payload.source_ip }} due to brute force attack
+                against {{ trigger.payload.host_id }}. Threat score: {{ trigger.payload.threat_score }}.
+                Signature: {{ trigger.payload.signature }}.
+                Preventing potential ransomware deployment after credential compromise.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Quarantine Targeted Host"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.destination_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "QUARANTINE"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              justification: >
+                Quarantining target host {{ trigger.payload.host_id }} ({{ trigger.payload.destination_ip }})
+                that was subject to brute force attack. Preventing potential credential compromise
+                and ransomware deployment.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Trigger Password Reset Protocol"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_RESPONSE"
+            data:
+              response_type: "credential_reset_required"
+              affected_host: "{{ trigger.payload.host_id }}"
+              target_ip: "{{ trigger.payload.destination_ip }}"
+              message: >
+                Mandatory password reset required for all accounts on {{ trigger.payload.host_id }}
+                following brute force attack detection.
+              priority: "critical"
+      
+      - name: "Alert Security Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "brute_force_mitigated"
+              message: >
+                Brute force attack from {{ trigger.payload.source_ip }} targeting {{ trigger.payload.host_id }}
+                has been mitigated. Attacker blocked, target quarantined. Password reset required.
+              priority: "urgent"
+
+  # ==========================================================================
+  # WORKFLOW 4: Privilege Escalation Detection and Immediate Containment
+  # ==========================================================================
+  - name: "Privilege Escalation Detection and Immediate Containment"
+    version: 1.0
+    description: >
+      This workflow triggers on privilege escalation alerts from Wazuh, which are often
+      precursors to ransomware deployment. When attackers gain elevated privileges, they
+      can disable security controls and encrypt critical files. This workflow implements
+      immediate containment to prevent ransomware execution.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ (trigger.payload.alert_type == 'privilege_escalation' or trigger.payload.signature == 'Privilege elevation detected') and trigger.payload.severity == 'high' and trigger.payload.threat_score >= 45 }}"
+    
+    steps:
+      - name: "Log Privilege Escalation Event"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "PRIVILEGE_ESCALATION_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              process: "{{ trigger.payload.process }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              signature: "{{ trigger.payload.signature }}"
+              signature_id: "{{ trigger.payload.signature_id }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              matched_rule: "{{ trigger.payload.matched_rule }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Terminate Suspicious Process"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "PROCESS_TERMINATION"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              process_path: "{{ trigger.payload.process }}"
+              action: "KILL_PROCESS"
+              justification: >
+                Terminating suspicious process {{ trigger.payload.process }} that triggered
+                privilege escalation alert on {{ trigger.payload.host_id }}.
+              source_event_id: "{{ trigger.event_id }}"
+      
+      - name: "Quarantine Compromised Host"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "QUARANTINE"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              justification: >
+                Privilege escalation detected on {{ trigger.payload.host_id }}.
+                Process {{ trigger.payload.process }} attempted elevation.
+                Threat Score: {{ trigger.payload.threat_score }}.
+                File: {{ trigger.payload.file_path }}.
+                Quarantining to prevent ransomware deployment.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Disable Elevated Accounts"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "ACCOUNT_MANAGEMENT"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              action: "DISABLE_ELEVATED_ACCOUNTS"
+              justification: >
+                Disabling elevated accounts on {{ trigger.payload.host_id }} following
+                privilege escalation detection to prevent ransomware deployment.
+              requires_manual_review: true
+      
+      - name: "Alert Incident Response Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "privilege_escalation_contained"
+              severity: "critical"
+              message: >
+                Privilege escalation attempt contained on {{ trigger.payload.host_id }}.
+                Suspicious process terminated, host quarantined, elevated accounts disabled.
+                Immediate forensic investigation required.
+              priority: "critical"
+              incident_response_required: true
+
+  # ==========================================================================
+  # WORKFLOW 5: Malicious Process Detection and System Isolation
+  # ==========================================================================
+  - name: "Malicious Process Detection and System Isolation"
+    version: 1.0
+    description: >
+      This workflow triggers on malicious process detection alerts from Wazuh.
+      Malicious processes often indicate ransomware execution or initial compromise.
+      The workflow terminates the process, quarantines the host, and prevents
+      further spread across the network.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.signature == 'Malicious process detected' and trigger.payload.severity == 'high' and trigger.payload.threat_score >= 50 }}"
+    
+    steps:
+      - name: "Log Malicious Process Detection"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "MALICIOUS_PROCESS_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              malicious_process: "{{ trigger.payload.process }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              signature_id: "{{ trigger.payload.signature_id }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Immediate Process Termination"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "ENDPOINT_ACTION"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              action: "TERMINATE_PROCESS"
+              process_path: "{{ trigger.payload.process }}"
+              force_kill: true
+              justification: >
+                Emergency termination of malicious process {{ trigger.payload.process }}
+                detected on {{ trigger.payload.host_id }} with threat score {{ trigger.payload.threat_score }}.
+              source_event_id: "{{ trigger.event_id }}"
+      
+      - name: "Block Network Communication"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              action: "BLOCK_ALL_TRAFFIC"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              justification: >
+                Blocking all network traffic from {{ trigger.payload.source_ip }} due to
+                malicious process execution. Preventing C2 communication and lateral movement.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Quarantine Host System"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "QUARANTINE"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              quarantine_type: "full_isolation"
+              justification: >
+                Full system quarantine of {{ trigger.payload.host_id }} after malicious process
+                {{ trigger.payload.process }} detection. Threat score: {{ trigger.payload.threat_score }}.
+                File: {{ trigger.payload.file_path }}. Preventing ransomware spread.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Initiate Forensic Collection"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "FORENSIC_REQUEST"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              collection_type: "memory_and_disk"
+              process_of_interest: "{{ trigger.payload.process }}"
+              file_of_interest: "{{ trigger.payload.file_path }}"
+              priority: "immediate"
+      
+      - name: "Alert Security Operations"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SOC_ALERT"
+            data:
+              alert_level: "critical"
+              incident_type: "malicious_process_ransomware"
+              affected_host: "{{ trigger.payload.host_id }}"
+              message: >
+                Malicious process {{ trigger.payload.process }} detected and terminated on
+                {{ trigger.payload.host_id }}. System quarantined. Forensic collection initiated.
+              requires_investigation: true
+              priority: "critical"
+
+  # ==========================================================================
+  # WORKFLOW 6: Medium Severity Alert Monitoring with Escalation
+  # ==========================================================================
+  - name: "Medium Severity Alert Monitoring with Escalation"
+    version: 1.0
+    description: >
+      This workflow triggers on medium-severity alerts from Wazuh with moderate threat scores.
+      Rather than immediate quarantine, it implements enhanced monitoring and rate-limiting.
+      If multiple medium-severity alerts occur from the same host within a time window,
+      the workflow escalates to quarantine, helping detect slow-moving ransomware campaigns.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.severity == 'medium' and trigger.payload.threat_score >= 35 and trigger.payload.threat_score < 65 }}"
+    
+    steps:
+      - name: "Log Medium Severity Alert"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "MEDIUM_SEVERITY_ALERT"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              alert_type: "{{ trigger.payload.alert_type }}"
+              signature: "{{ trigger.payload.signature }}"
+              process: "{{ trigger.payload.process }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              matched_rule: "{{ trigger.payload.matched_rule }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Implement Rate Limiting"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "RATE_LIMIT"
+              sdn_controller: "opendaylight"
+              priority: "medium"
+              rate_limit_mbps: 10
+              justification: >
+                Applying rate limiting to {{ trigger.payload.host_id }} due to medium-severity
+                {{ trigger.payload.alert_type }} alert. Threat score: {{ trigger.payload.threat_score }}.
+                Monitoring for escalation patterns.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Enable Enhanced Monitoring"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "MONITORING_ENHANCEMENT"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              monitoring_level: "enhanced"
+              watch_processes: true
+              watch_network: true
+              watch_file_changes: true
+              duration: "1 hour"
+              justification: >
+                Enhanced monitoring activated for {{ trigger.payload.host_id }} following
+                {{ trigger.payload.alert_type }} detection.
+      
+      - name: "Check for Alert Correlation"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "CORRELATION_REQUEST"
+            data:
+              source_event_id: "{{ trigger.event_id }}"
+              correlation_window: "30 minutes"
+              target_host: "{{ trigger.payload.host_id }}"
+              correlation_criteria:
+                - "same_host"
+                - "severity_medium_or_higher"
+                - "threat_score_threshold: 30"
+              escalation_threshold: 3
+              escalation_action: "QUARANTINE"
+      
+      - name: "Wait for Correlation Results or Timeout"
+        wait_for:
+          event_type: "CORRELATION_RESULT"
+          timeout: "30 minutes"
+          conditions:
+            - "{{ new_event.data.source_event_id == trigger.event_id }}"
+            - "{{ new_event.data.correlation_count >= 3 }}"
+      
+      - name: "Escalate to Quarantine if Correlated"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "QUARANTINE"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              justification: >
+                Escalating to quarantine for {{ trigger.payload.host_id }} due to multiple
+                correlated medium-severity alerts within 30 minutes. Pattern indicates
+                potential ransomware campaign. Original alert: {{ trigger.payload.alert_type }}.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated_escalation"
+              correlation_data: "{{ new_event.data }}"
+      
+      - name: "Notify Security Analyst"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "medium_severity_tracked"
+              message: >
+                Medium-severity {{ trigger.payload.alert_type }} on {{ trigger.payload.host_id }}.
+                Rate limiting applied, enhanced monitoring active.
+                Will auto-escalate if pattern continues.
+              priority: "medium"
+
+  # ==========================================================================
+  # WORKFLOW 7: Web Attack Detection and Application-Level Response
+  # ==========================================================================
+  - name: "Web Attack Detection and Application-Level Response"
+    version: 1.0
+    description: >
+      This workflow triggers on web-based attacks including SQL injection, XSS, and
+      command injection attempts. While these may seem like web vulnerabilities, they
+      are often precursors to ransomware attacks where attackers gain initial access
+      through web applications before deploying ransomware payloads.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ (trigger.payload.alert_type == 'sql_injection' or trigger.payload.alert_type == 'xss_attack' or trigger.payload.alert_type == 'command_injection' or trigger.payload.signature == 'SQL injection pattern found' or trigger.payload.signature == 'Cross-site scripting detected') and trigger.payload.severity == 'high' }}"
+    
+    steps:
+      - name: "Log Web Attack Attempt"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "WEB_ATTACK_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              attack_type: "{{ trigger.payload.alert_type }}"
+              attacker_ip: "{{ trigger.payload.source_ip }}"
+              target_host: "{{ trigger.payload.host_id }}"
+              target_ip: "{{ trigger.payload.destination_ip }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              signature: "{{ trigger.payload.signature }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Block Attacker IP at Network Edge"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              action: "BLOCK_SOURCE"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              block_scope: "network_wide"
+              justification: >
+                Blocking attacker IP {{ trigger.payload.source_ip }} network-wide due to
+                {{ trigger.payload.alert_type }} attempt against {{ trigger.payload.host_id }}.
+                Signature: {{ trigger.payload.signature }}.
+                Preventing potential ransomware delivery through compromised web application.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Isolate Vulnerable Web Server"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.destination_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "ISOLATE_SEGMENT"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              allowed_services:
+                - "SSH_ADMIN"
+              justification: >
+                Isolating web server {{ trigger.payload.host_id }} to administrative access only
+                following {{ trigger.payload.alert_type }} detection.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Disable Vulnerable Application Components"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "APPLICATION_CONTROL"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              action: "DISABLE_SERVICE"
+              affected_file: "{{ trigger.payload.file_path }}"
+              justification: >
+                Disabling vulnerable component {{ trigger.payload.file_path }} on
+                {{ trigger.payload.host_id }} to prevent exploitation and ransomware delivery.
+      
+      - name: "Initiate Security Patch Check"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "VULNERABILITY_ASSESSMENT"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              assessment_type: "emergency_patch_status"
+              focus_area: "web_application"
+              priority: "critical"
+      
+      - name: "Alert Web Security Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "web_attack_mitigated"
+              attack_type: "{{ trigger.payload.alert_type }}"
+              message: >
+                {{ trigger.payload.alert_type }} attack from {{ trigger.payload.source_ip }}
+                targeting {{ trigger.payload.host_id }} has been blocked. Attacker IP blocked
+                network-wide, web server isolated. Immediate patching required.
+              priority: "critical"
+              requires_patching: true
+
+  # ==========================================================================
+  # WORKFLOW 8: DDoS Attack Detection and Traffic Management
+  # ==========================================================================
+  - name: "DDoS Attack Detection and Traffic Management"
+    version: 1.0
+    description: >
+      This workflow triggers on DDoS attack alerts from Wazuh. While DDoS attacks
+      are often used for disruption, they can also serve as smokescreen for ransomware
+      deployment, distracting security teams while attackers infiltrate the network.
+      This workflow implements traffic management and monitors for concurrent intrusion attempts.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.alert_type == 'ddos_attack' and trigger.payload.severity == 'high' }}"
+    
+    steps:
+      - name: "Log DDoS Attack Event"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "DDOS_ATTACK_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              target_host: "{{ trigger.payload.host_id }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              signature: "{{ trigger.payload.signature }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              matched_rule: "{{ trigger.payload.matched_rule }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Implement Traffic Rate Limiting"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              action: "RATE_LIMIT_AGGRESSIVE"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              rate_limit_pps: 1000
+              protocol: "{{ trigger.payload.protocol }}"
+              justification: >
+                Aggressive rate limiting applied to {{ trigger.payload.source_ip }} due to
+                DDoS attack using {{ trigger.payload.protocol }} protocol targeting {{ trigger.payload.host_id }}.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Enable DDoS Scrubbing"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "TRAFFIC_MANAGEMENT"
+            data:
+              targetHost: "{{ trigger.payload.destination_ip }}"
+              action: "ENABLE_SCRUBBING"
+              scrubbing_type: "protocol_specific"
+              protocol: "{{ trigger.payload.protocol }}"
+              justification: >
+                Enabling traffic scrubbing for {{ trigger.payload.host_id }} under DDoS attack.
+      
+      - name: "Monitor for Concurrent Intrusion Attempts"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "ENHANCED_MONITORING"
+            data:
+              monitoring_scope: "network_wide"
+              monitoring_type: "intrusion_detection"
+              focus: "authentication_attempts_and_data_exfiltration"
+              duration: "2 hours"
+              justification: >
+                Enhanced monitoring active during DDoS attack to detect potential
+                concurrent ransomware deployment attempts using attack as distraction.
+      
+      - name: "Check Network-Wide Alert Correlation"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "CORRELATION_REQUEST"
+            data:
+              source_event_id: "{{ trigger.event_id }}"
+              correlation_window: "1 hour"
+              correlation_type: "network_wide"
+              suspicious_patterns:
+                - "authentication_failures"
+                - "privilege_escalation"
+                - "data_exfiltration"
+                - "malicious_process"
+              alert_if_found: true
+      
+      - name: "Wait for Correlation Results"
+        wait_for:
+          event_type: "CORRELATION_RESULT"
+          timeout: "1 hour"
+          conditions:
+            - "{{ new_event.data.source_event_id == trigger.event_id }}"
+            - "{{ new_event.data.suspicious_activity_detected == true }}"
+      
+      - name: "Escalate to Network-Wide Protection"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              action: "NETWORK_WIDE_PROTECTION"
+              sdn_controller: "opendaylight"
+              priority: "critical"
+              protection_mode: "high_security"
+              justification: >
+                DDoS attack detected concurrent with suspicious activity. Escalating to
+                network-wide protection mode. Potential coordinated ransomware attack.
+              source_event_id: "{{ trigger.event_id }}"
+              correlation_event_id: "{{ new_event.data.event_id }}"
+              mitigation_type: "automated_escalation"
+      
+      - name: "Alert Network Operations and Security"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "ddos_with_correlation"
+              message: >
+                DDoS attack from {{ trigger.payload.source_ip }} detected. Rate limiting
+                and scrubbing active. Network-wide monitoring enabled for concurrent threats.
+              priority: "high"
+              teams:
+                - "network_operations"
+                - "security_operations"
+                - "incident_response"
+
+  # ==========================================================================
+  # WORKFLOW 9: Unauthorized Access Detection and Account Lockdown
+  # ==========================================================================
+  - name: "Unauthorized Access Detection and Account Lockdown"
+    version: 1.0
+    description: >
+      This workflow triggers on unauthorized access attempts and multiple failed login
+      attempts from Wazuh alerts. Unauthorized access is a common initial vector for
+      ransomware deployment. The workflow locks down accounts, blocks source IPs, and
+      implements strict authentication controls.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ (trigger.payload.signature == 'Unauthorized access attempt' or trigger.payload.signature == 'Multiple failed login attempts') and trigger.payload.severity == 'high' }}"
+    
+    steps:
+      - name: "Log Unauthorized Access Attempt"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "UNAUTHORIZED_ACCESS_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              attacker_ip: "{{ trigger.payload.source_ip }}"
+              target_host: "{{ trigger.payload.host_id }}"
+              target_ip: "{{ trigger.payload.destination_ip }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              signature: "{{ trigger.payload.signature }}"
+              signature_id: "{{ trigger.payload.signature_id }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              matched_rule: "{{ trigger.payload.matched_rule }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Block Attacker Source IP"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              action: "BLOCK_SOURCE"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              block_duration: "permanent"
+              justification: >
+                Permanently blocking {{ trigger.payload.source_ip }} due to unauthorized
+                access attempts against {{ trigger.payload.host_id }}.
+                Signature: {{ trigger.payload.signature }}.
+                Preventing potential ransomware deployment via compromised credentials.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Lock Targeted User Accounts"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "ACCOUNT_MANAGEMENT"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              action: "LOCK_ACCOUNTS"
+              lock_type: "suspicious_activity"
+              justification: >
+                Locking user accounts on {{ trigger.payload.host_id }} due to unauthorized
+                access attempts from {{ trigger.payload.source_ip }}.
+              requires_admin_unlock: true
+      
+      - name: "Enable Multi-Factor Authentication Enforcement"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "AUTHENTICATION_POLICY"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              policy: "ENFORCE_MFA"
+              scope: "all_users"
+              temporary: false
+              justification: >
+                Enforcing MFA on {{ trigger.payload.host_id }} following unauthorized
+                access attempts to prevent credential-based ransomware attacks.
+      
+      - name: "Implement IP Whitelist Restriction"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.destination_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "WHITELIST_MODE"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              justification: >
+                Switching {{ trigger.payload.host_id }} to IP whitelist mode. Only pre-approved
+                IP addresses can access this system following unauthorized access detection.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Audit Recent Successful Logins"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_AUDIT"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              audit_type: "authentication_history"
+              time_window: "24 hours"
+              focus: "successful_logins"
+              justification: >
+                Auditing recent logins to {{ trigger.payload.host_id }} to identify
+                potential successful breaches before detection.
+      
+      - name: "Alert Identity and Access Management Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "unauthorized_access_blocked"
+              message: >
+                Unauthorized access attempts from {{ trigger.payload.source_ip }} to
+                {{ trigger.payload.host_id }} blocked. Source IP permanently blocked,
+                accounts locked, MFA enforced, whitelist mode activated.
+              priority: "critical"
+              teams:
+                - "identity_access_management"
+                - "security_operations"
+              action_required: "account_review_and_password_reset"
+
+  # ==========================================================================
+  # WORKFLOW 10: Network Anomaly Detection and Behavioral Analysis
+  # ==========================================================================
+  - name: "Network Anomaly Detection and Behavioral Analysis"
+    version: 1.0
+    description: >
+      This workflow triggers on network anomaly detection alerts from Wazuh.
+      Network anomalies can indicate command and control (C2) communication,
+      data exfiltration, or lateral movement associated with ransomware attacks.
+      The workflow implements traffic analysis and behavioral monitoring to
+      identify and contain ransomware-related network activity.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.signature == 'Network anomaly detected' and trigger.payload.severity == 'high' and trigger.payload.threat_score >= 60 }}"
+    
+    steps:
+      - name: "Log Network Anomaly Event"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "NETWORK_ANOMALY_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              signature_id: "{{ trigger.payload.signature_id }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              matched_rule: "{{ trigger.payload.matched_rule }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Capture Network Traffic Sample"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "TRAFFIC_CAPTURE"
+            data:
+              source_ip: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              capture_duration: "5 minutes"
+              capture_type: "deep_packet_inspection"
+              justification: >
+                Capturing traffic from {{ trigger.payload.source_ip }} for anomaly analysis.
+      
+      - name: "Analyze Communication Pattern"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "BEHAVIORAL_ANALYSIS"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              analysis_type: "network_behavior"
+              focus_areas:
+                - "c2_communication_patterns"
+                - "beaconing_behavior"
+                - "unusual_ports"
+                - "encrypted_traffic_spikes"
+                - "data_transfer_volumes"
+              time_window: "1 hour"
+      
+      - name: "Implement Traffic Throttling"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "THROTTLE_TRAFFIC"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              throttle_rate: "50%"
+              justification: >
+                Throttling traffic from {{ trigger.payload.host_id }} due to network anomaly.
+                Slowing potential C2 communication or data exfiltration while analysis continues.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Wait for Behavioral Analysis Results"
+        wait_for:
+          event_type: "BEHAVIORAL_ANALYSIS_RESULT"
+          timeout: "10 minutes"
+          conditions:
+            - "{{ new_event.data.target_host == trigger.payload.host_id }}"
+            - "{{ new_event.data.suspicious_patterns_found == true }}"
+      
+      - name: "Block Suspicious External Communication"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              action: "BLOCK_DESTINATION"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              justification: >
+                Blocking communication between {{ trigger.payload.host_id }} and
+                {{ trigger.payload.destination_ip }} due to confirmed suspicious patterns.
+                Analysis identified: {{ new_event.data.patterns_detected }}.
+                Preventing potential C2 communication or data exfiltration.
+              source_event_id: "{{ trigger.event_id }}"
+              analysis_event_id: "{{ new_event.data.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Quarantine if C2 Pattern Confirmed"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "QUARANTINE"
+              sdn_controller: "opendaylight"
+              priority: "critical"
+              justification: >
+                Full quarantine of {{ trigger.payload.host_id }} following confirmation
+                of C2-like network behavior. Threat score: {{ trigger.payload.threat_score }}.
+                Behavioral patterns: {{ new_event.data.patterns_detected }}.
+                Containing suspected ransomware infection.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated_escalation"
+      
+      - name: "Alert Threat Intelligence Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "network_anomaly_c2_suspected"
+              message: >
+                Network anomaly detected on {{ trigger.payload.host_id }} with confirmed
+                suspicious behavioral patterns. C2 communication suspected. Host quarantined.
+                External IP {{ trigger.payload.destination_ip }} blocked.
+              priority: "critical"
+              teams:
+                - "threat_intelligence"
+                - "incident_response"
+                - "network_security"
+              ioc_data:
+                external_ip: "{{ trigger.payload.destination_ip }}"
+                protocol: "{{ trigger.payload.protocol }}"
+                patterns: "{{ new_event.data.patterns_detected }}"
+
+  # ==========================================================================
+  # WORKFLOW 11: Intrusion Attempt Detection with Immediate Response
+  # ==========================================================================
+  - name: "Intrusion Attempt Detection with Immediate Response"
+    version: 1.0
+    description: >
+      This workflow triggers on intrusion attempt alerts with medium to high severity.
+      Intrusion attempts often precede ransomware deployment as attackers probe for
+      vulnerabilities and entry points. This workflow implements multi-layered defense
+      to stop intrusions before they escalate.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.alert_type == 'intrusion_attempt' and (trigger.payload.severity == 'high' or trigger.payload.severity == 'medium') }}"
+    
+    steps:
+      - name: "Log Intrusion Attempt"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INTRUSION_ATTEMPT_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              attacker_ip: "{{ trigger.payload.source_ip }}"
+              target_host: "{{ trigger.payload.host_id }}"
+              signature: "{{ trigger.payload.signature }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              severity: "{{ trigger.payload.severity }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Block Intrusion Source"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              action: "BLOCK_SOURCE"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              justification: >
+                Blocking intrusion source {{ trigger.payload.source_ip }} attempting
+                to compromise {{ trigger.payload.host_id }}.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Harden Target System Defenses"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_HARDENING"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              hardening_actions:
+                - "close_unused_ports"
+                - "enable_firewall_strict_mode"
+                - "disable_unnecessary_services"
+              justification: >
+                Hardening {{ trigger.payload.host_id }} following intrusion attempt.
+      
+      - name: "Enable IPS Mode"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.destination_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "ENABLE_IPS"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              justification: >
+                Enabling Intrusion Prevention System mode for {{ trigger.payload.host_id }}.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Alert Security Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "intrusion_blocked"
+              message: >
+                Intrusion attempt from {{ trigger.payload.source_ip }} blocked.
+                Target {{ trigger.payload.host_id }} hardened and IPS enabled.
+              priority: "high"
+
+  # ==========================================================================
+  # WORKFLOW 12: Malware Execution Detection and Containment
+  # ==========================================================================
+  - name: "Malware Execution Detection and Containment"
+    version: 1.0
+    description: >
+      This workflow triggers specifically on malware execution alerts which typically
+      indicate active ransomware or its precursor malware. Implements aggressive
+      containment including process termination, network isolation, and backup protection.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.alert_type == 'malware_execution' and trigger.payload.severity == 'medium' and trigger.payload.threat_score >= 30 }}"
+    
+    steps:
+      - name: "Log Malware Execution Event"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "MALWARE_EXECUTION_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              process: "{{ trigger.payload.process }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              signature: "{{ trigger.payload.signature }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Emergency Process Termination"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "ENDPOINT_ACTION"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              action: "TERMINATE_PROCESS"
+              process_path: "{{ trigger.payload.process }}"
+              force_kill: true
+              kill_child_processes: true
+              justification: >
+                Emergency termination of malware process {{ trigger.payload.process }}.
+              source_event_id: "{{ trigger.event_id }}"
+      
+      - name: "Protect Backup Systems"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "BACKUP_PROTECTION"
+            data:
+              action: "ISOLATE_BACKUPS"
+              affected_host: "{{ trigger.payload.host_id }}"
+              justification: >
+                Isolating backup systems from {{ trigger.payload.host_id }} to prevent
+                ransomware from destroying backups.
+      
+      - name: "Quarantine Infected Host"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "QUARANTINE"
+              sdn_controller: "opendaylight"
+              priority: "critical"
+              justification: >
+                Quarantining {{ trigger.payload.host_id }} due to malware execution.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Initiate Malware Sample Collection"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "FORENSIC_REQUEST"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              collection_type: "malware_sample"
+              file_of_interest: "{{ trigger.payload.file_path }}"
+              priority: "immediate"
+      
+      - name: "Alert Malware Analysis Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "malware_execution_contained"
+              message: >
+                Malware execution on {{ trigger.payload.host_id }} contained.
+                Process terminated, backups protected, host quarantined.
+              priority: "critical"
+
+  # ==========================================================================
+  # WORKFLOW 13: Data Leak Suspicious Activity Response
+  # ==========================================================================
+  - name: "Data Leak Suspicious Activity Response"
+    version: 1.0
+    description: >
+      This workflow triggers when data leaks are suspected, which is common in
+      double-extortion ransomware attacks where data is exfiltrated before encryption.
+      Implements immediate data loss prevention measures.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.signature == 'Data leak suspected' and (trigger.payload.severity == 'high' or trigger.payload.severity == 'medium') and trigger.payload.threat_score >= 35 }}"
+    
+    steps:
+      - name: "Log Data Leak Event"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "DATA_LEAK_SUSPECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              protocol: "{{ trigger.payload.protocol }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Block Data Transfer"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              destination_ip: "{{ trigger.payload.destination_ip }}"
+              action: "BLOCK_COMMUNICATION"
+              sdn_controller: "opendaylight"
+              priority: "immediate"
+              protocol: "{{ trigger.payload.protocol }}"
+              justification: >
+                Blocking suspected data leak from {{ trigger.payload.host_id }} to
+                {{ trigger.payload.destination_ip }} via {{ trigger.payload.protocol }}.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Enable DLP Mode"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "DATA_LOSS_PREVENTION"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              action: "ENABLE_DLP_STRICT"
+              monitor_file_transfers: true
+              block_large_transfers: true
+              justification: >
+                Enabling strict DLP mode on {{ trigger.payload.host_id }}.
+      
+      - name: "Throttle Outbound Bandwidth"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "THROTTLE_OUTBOUND"
+              sdn_controller: "opendaylight"
+              priority: "high"
+              bandwidth_limit_kbps: 100
+              justification: >
+                Throttling outbound bandwidth from {{ trigger.payload.host_id }} to limit data leak.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Alert Data Protection Officer"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "SECURITY_NOTIFICATION"
+            data:
+              notification_type: "data_leak_prevented"
+              message: >
+                Suspected data leak from {{ trigger.payload.host_id }} prevented.
+                Transfer blocked, DLP enabled, bandwidth throttled.
+              priority: "critical"
+              requires_investigation: true
+
+  # ==========================================================================
+  # WORKFLOW 14: High Threat Score Rapid Response
+  # ==========================================================================
+  - name: "High Threat Score Rapid Response"
+    version: 1.0
+    description: >
+      This workflow triggers on any alert with exceptionally high threat scores
+      regardless of alert type. High threat scores indicate confirmed malicious
+      activity requiring immediate aggressive response.
+    
+    trigger:
+      event_type: "alerts.host.wazuh"
+      condition: "{{ trigger.payload.threat_score >= 80 and trigger.payload.severity == 'high' }}"
+    
+    steps:
+      - name: "Log High Threat Event"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "HIGH_THREAT_DETECTED"
+            data:
+              event_id: "{{ trigger.event_id }}"
+              host_id: "{{ trigger.payload.host_id }}"
+              source_ip: "{{ trigger.payload.source_ip }}"
+              alert_type: "{{ trigger.payload.alert_type }}"
+              signature: "{{ trigger.payload.signature }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              process: "{{ trigger.payload.process }}"
+              file_path: "{{ trigger.payload.file_path }}"
+              timestamp: "{{ trigger.timestamp }}"
+      
+      - name: "Immediate Network Isolation"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "INITIATE_MITIGATION"
+            data:
+              targetHost: "{{ trigger.payload.source_ip }}"
+              hostId: "{{ trigger.payload.host_id }}"
+              action: "COMPLETE_ISOLATION"
+              sdn_controller: "opendaylight"
+              priority: "critical"
+              allow_management: false
+              justification: >
+                Complete network isolation of {{ trigger.payload.host_id }} due to
+                threat score {{ trigger.payload.threat_score }}. Alert: {{ trigger.payload.alert_type }}.
+              source_event_id: "{{ trigger.event_id }}"
+              mitigation_type: "automated"
+      
+      - name: "Suspend All User Sessions"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "ACCOUNT_MANAGEMENT"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              action: "SUSPEND_ALL_SESSIONS"
+              justification: >
+                Suspending all active user sessions on {{ trigger.payload.host_id }}.
+      
+      - name: "Initiate Emergency Backup"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "BACKUP_EMERGENCY"
+            data:
+              targetHost: "{{ trigger.payload.host_id }}"
+              backup_type: "critical_data_snapshot"
+              priority: "immediate"
+              justification: >
+                Emergency backup of critical data from {{ trigger.payload.host_id }}
+                before potential ransomware encryption.
+      
+      - name: "Alert Executive Security Team"
+        action:
+          type: "PUBLISH_EVENT"
+          event:
+            type: "EXECUTIVE_ALERT"
+            data:
+              alert_level: "critical"
+              incident_type: "high_confidence_ransomware"
+              affected_host: "{{ trigger.payload.host_id }}"
+              threat_score: "{{ trigger.payload.threat_score }}"
+              message: >
+                CRITICAL: Threat score {{ trigger.payload.threat_score }} detected on
+                {{ trigger.payload.host_id }}. Complete isolation and emergency backup initiated.
+              priority: "critical"
