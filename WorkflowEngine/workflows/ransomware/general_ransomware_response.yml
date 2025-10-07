@@ -1,0 +1,54 @@
+name: "General Ransomware Response"
+version: 1.0
+description: >
+  Baseline response for any ransomware detection.
+  Executes regardless of specific conditions to provide immediate containment.
+  This workflow is always executed first for any ransomware alert.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Log Ransomware Detection Event"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "RANSOMWARE_DETECTED"
+        data:
+          event_id: "{{ trigger.event_id }}"
+          host_id: "{{ trigger.payload.host_id }}"
+          source_ip: "{{ trigger.payload.source_ip }}"
+          severity: "{{ trigger.payload.severity }}"
+          alert_type: "{{ trigger.payload.alert_type }}"
+          timestamp: "{{ trigger.timestamp }}"
+          
+  - name: "Initiate Host Network Isolation"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "ISOLATE"
+          sdn_controller: "opendaylight"
+          priority: "high"
+          justification: "Ransomware detected on {{ trigger.payload.host_id }}. Immediate network isolation required."
+          source_event_id: "{{ trigger.event_id }}"
+          
+  - name: "Alert Security Operations Center"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SOC_ALERT"
+        data:
+          alert_level: "critical"
+          incident_type: "ransomware_detection"
+          affected_host: "{{ trigger.payload.source_ip }}"
+          host_identifier: "{{ trigger.payload.host_id }}"
+          severity: "{{ trigger.payload.severity }}"
+          action_taken: "HOST_ISOLATED"
+          requires_investigation: true
+          message: "CRITICAL: Ransomware detected on {{ trigger.payload.host_id }} ({{ trigger.payload.source_ip }}). Host has been automatically isolated. Immediate investigation required."
+

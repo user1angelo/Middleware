@@ -21,6 +21,7 @@ public class TCSTester {
     private static final String RABBITMQ_USER = "guest";
     private static final String RABBITMQ_PASSWORD = "guest";
     private static final String ALERTS_QUEUE = "alerts_queue";
+    private static final String WORKFLOW_QUEUE = "workflow_queue";
     
     private static final Random random = new Random();
     private static final Scanner scanner = new Scanner(System.in);
@@ -29,19 +30,17 @@ public class TCSTester {
     private static final ZoneId MANILA_ZONE = ZoneId.of("Asia/Manila");
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
     
-    // Random data pools
-    private static final String[] SEVERITIES = {"high", "medium", "low", "critical"};
+    // Random data pools - RANSOMWARE ONLY
+    private static final String[] SEVERITIES = {"high", "critical"}; // Only high-severity ransomware
     private static final String[] ALERT_TYPES = {
-        "ransomware_detection", "malware_execution", "intrusion_attempt", 
-        "ddos_attack", "data_exfiltration", "privilege_escalation",
-        "brute_force_attack", "sql_injection", "xss_attack", "command_injection"
+        "ransomware_detection", "ransomware_encryption", "ransomware_propagation"
     };
     private static final String[] SIGNATURES = {
-        "Suspicious file encryption activity", "Malicious process detected",
-        "Unauthorized access attempt", "Network anomaly detected",
-        "Data leak suspected", "Privilege elevation detected",
-        "Multiple failed login attempts", "SQL injection pattern found",
-        "Cross-site scripting detected", "Shell command execution"
+        "Suspicious file encryption activity", "Mass file modification detected",
+        "Ransomware encryption pattern", "File system lockdown attempt",
+        "Crypto-locker behavior detected", "Ransomware process execution",
+        "Volume shadow copy deletion", "Backup deletion attempt",
+        "Extension modification (.encrypted)", "Shell command execution"
     };
     private static final String[] PROTOCOLS = {"TCP", "UDP", "ICMP", "HTTP", "HTTPS"};
     
@@ -118,8 +117,11 @@ public class TCSTester {
         try (Connection connection = factory.newConnection();
              Channel channel = connection.createChannel()) {
             
+            // Declare both queues
             channel.queueDeclare(ALERTS_QUEUE, true, false, false, null);
+            channel.queueDeclare(WORKFLOW_QUEUE, true, false, false, null);
             System.out.println("\n✅ Connected to RabbitMQ");
+            System.out.println("✅ Alerts will be sent to BOTH queues (alerts_queue + workflow_queue)");
             
             if (infinite) {
                 // Setup non-blocking input reader
@@ -128,12 +130,15 @@ public class TCSTester {
                 
                 while (!reader.ready()) {
                     JSONObject alert = generateRandomAlert();
+                    
+                    // Send to both queues (broadcast pattern)
                     channel.basicPublish("", ALERTS_QUEUE, null, alert.toString().getBytes("UTF-8"));
+                    channel.basicPublish("", WORKFLOW_QUEUE, null, alert.toString().getBytes("UTF-8"));
                     sent++;
                     
                     String severity = alert.getJSONObject("payload").getString("severity");
                     String alertType = alert.getJSONObject("payload").getString("alert_type");
-                    System.out.println("📤 Sent alert #" + sent + " | Severity: " + severity + " | Type: " + alertType);
+                    System.out.println("📤 Sent alert #" + sent + " | Severity: " + severity + " | Type: " + alertType + " | To: both queues");
                     
                     Thread.sleep(500); // 0.5 second delay
                 }
@@ -146,11 +151,14 @@ public class TCSTester {
                 
                 for (int i = 1; i <= count; i++) {
                     JSONObject alert = generateRandomAlert();
+                    
+                    // Send to both queues (broadcast pattern)
                     channel.basicPublish("", ALERTS_QUEUE, null, alert.toString().getBytes("UTF-8"));
+                    channel.basicPublish("", WORKFLOW_QUEUE, null, alert.toString().getBytes("UTF-8"));
                     
                     String severity = alert.getJSONObject("payload").getString("severity");
                     String alertType = alert.getJSONObject("payload").getString("alert_type");
-                    System.out.println("📤 Sent alert " + i + "/" + count + " | Severity: " + severity + " | Type: " + alertType);
+                    System.out.println("📤 Sent alert " + i + "/" + count + " | Severity: " + severity + " | Type: " + alertType + " | To: both queues");
                     
                     Thread.sleep(500); // 0.5 second delay
                 }
@@ -199,8 +207,9 @@ public class TCSTester {
             payload.put("file_path", "/home/user" + random.nextInt(10) + "/file" + random.nextInt(1000) + ".dat");
         }
         
-        payload.put("threat_score", random.nextInt(100));
-        payload.put("matched_rule", "rule_" + random.nextInt(1000));
+        // High threat score for ransomware (70-100 range to match workflow conditions)
+        payload.put("threat_score", 70 + random.nextInt(31)); // 70-100
+        payload.put("matched_rule", "ransomware_rule_" + random.nextInt(100));
         
         alert.put("payload", payload);
         return alert;

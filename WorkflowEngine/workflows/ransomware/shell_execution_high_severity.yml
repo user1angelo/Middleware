@@ -1,0 +1,87 @@
+name: "High-Severity Shell Execution Detection and Quarantine"
+version: 1.0
+description: >
+  Responds to high-severity shell command execution with threat score >= 70.
+  Provides additional targeted response beyond general ransomware containment.
+  Focuses on process termination and forensics collection.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.severity == 'high' and trigger.payload.signature == 'Shell command execution' and trigger.payload.threat_score >= 70 }}"
+
+steps:
+  - name: "Log Critical Shell Execution Event"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "CRITICAL_SHELL_EXECUTION"
+        data:
+          event_id: "{{ trigger.event_id }}"
+          host_id: "{{ trigger.payload.host_id }}"
+          process: "{{ trigger.payload.process }}"
+          file_path: "{{ trigger.payload.file_path }}"
+          signature: "{{ trigger.payload.signature }}"
+          signature_id: "{{ trigger.payload.signature_id }}"
+          threat_score: "{{ trigger.payload.threat_score }}"
+          matched_rule: "{{ trigger.payload.matched_rule }}"
+          protocol: "{{ trigger.payload.protocol }}"
+          
+  - name: "Immediate Host Quarantine via OpenDaylight"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "QUARANTINE"
+          sdn_controller: "opendaylight"
+          priority: "immediate"
+          justification: "Critical shell command execution detected on {{ trigger.payload.host_id }}. Threat Score: {{ trigger.payload.threat_score }}/100. Malicious process {{ trigger.payload.process }} attempting execution. Rule {{ trigger.payload.matched_rule }} matched. Immediate quarantine required to prevent ransomware spread."
+          source_event_id: "{{ trigger.event_id }}"
+          mitigation_type: "automated"
+          
+  - name: "Request Process Termination"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "TERMINATE_PROCESS"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          process_path: "{{ trigger.payload.process }}"
+          threat_score: "{{ trigger.payload.threat_score }}"
+          force_kill: true
+          reason: "High-severity ransomware shell execution detected"
+          
+  - name: "Initiate Forensics Collection"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "COLLECT_FORENSICS"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          collect_memory_dump: true
+          collect_process_list: true
+          collect_file_artifacts: true
+          file_paths:
+            - "{{ trigger.payload.process }}"
+            - "{{ trigger.payload.file_path }}"
+          incident_id: "{{ trigger.event_id }}"
+          
+  - name: "Escalate to Security Team"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SECURITY_ESCALATION"
+        data:
+          escalation_level: "urgent"
+          incident_type: "shell_execution_ransomware"
+          affected_host: "{{ trigger.payload.source_ip }}"
+          host_identifier: "{{ trigger.payload.host_id }}"
+          threat_score: "{{ trigger.payload.threat_score }}"
+          actions_taken: "HOST_QUARANTINED, PROCESS_TERMINATED, FORENSICS_INITIATED"
+          requires_immediate_response: true
+          message: "URGENT: High-severity shell command execution (threat score {{ trigger.payload.threat_score }}) detected on {{ trigger.payload.host_id }} ({{ trigger.payload.source_ip }}). Host quarantined, process terminated, forensics collection in progress. Immediate security team response required."
+
