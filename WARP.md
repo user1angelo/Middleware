@@ -100,7 +100,30 @@ javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
 javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
 ```
 
-### Run Individual Components
+### Run ThreatContextStore
+
+**Primary Method - Run Everything (Recommended):**
+
+This starts both RabbitMQListener and file-watching AlertProcessor as separate threads in one process:
+
+```bash
+# Linux/macOS
+java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+
+# Windows
+java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+```
+
+**Features:**
+- Runs RabbitMQ Listener and Alert Processor in separate threads
+- Automatically processes existing files in `messages/` at startup
+- Watches `messages/` directory for new files and auto-processes them
+- Graceful shutdown with CTRL+C
+- Single process, easier to manage
+
+### Run Individual Components (Alternative)
+
+You can still run components separately for testing or specific use cases:
 
 **RabbitMQ Listener** (consumes from queue and stores in PostgreSQL):
 ```bash
@@ -111,7 +134,7 @@ java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
 java -cp "out;lib/*" com.yourorg.middleware.RabbitMQListener
 ```
 
-**Alert Processor** (sends JSON files from messages/ to RabbitMQ):
+**Alert Processor** (sends JSON files from messages/ to RabbitMQ - one-time):
 ```bash
 # Linux/macOS
 java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
@@ -185,13 +208,21 @@ Message Files (JSON) → AlertProcessor → alerts_queue (RabbitMQ)
 
 ### Key Classes
 
-**1. ConfigLoader** (`ConfigLoader.java`)
+**1. ThreatContextStoreMain** (`ThreatContextStoreMain.java`)
+- Main application entry point (recommended for production)
+- Runs RabbitMQListener and AlertProcessor as separate threads
+- File watcher monitors `messages/` directory for new files
+- Automatically processes files as they appear
+- Single process with graceful shutdown
+- Uses thread pool for concurrent operations
+
+**2. ConfigLoader** (`ConfigLoader.java`)
 - Central configuration management
 - Reads from `config.properties` with fallback to defaults
 - Provides type-safe getters for all configuration values
 - Used by all components for consistent configuration
 
-**2. WazuhAlertDao** (`WazuhAlertDao.java`)
+**3. WazuhAlertDao** (`WazuhAlertDao.java`)
 - Data Access Object for PostgreSQL operations
 - Handles message insertion with duplicate detection (checks `event_id`)
 - Stores alerts and queries (not query_responses)
@@ -200,13 +231,13 @@ Message Files (JSON) → AlertProcessor → alerts_queue (RabbitMQ)
 - Tracks query execution status (response_count, response_status)
 - Uses ConfigLoader for database connection settings
 
-**3. QueryTranslator** (`QueryTranslator.java`)
+**4. QueryTranslator** (`QueryTranslator.java`)
 - Translates JSON query messages into SQL queries
 - Builds WHERE clauses from JSON filters
 - Supports ordering, limiting, and JSONB field queries
 - Returns SQL string and parameterized values
 
-**4. RabbitMQListener** (`RabbitMQListener.java`)
+**5. RabbitMQListener** (`RabbitMQListener.java`)
 - Primary consumer implementation with robust error handling
 - Routes messages based on `message_type` field:
   - **alert**: Store in database
@@ -216,21 +247,21 @@ Message Files (JSON) → AlertProcessor → alerts_queue (RabbitMQ)
 - Includes graceful shutdown hooks
 - Uses ConfigLoader for RabbitMQ connection settings
 
-**5. ListenerWorker** (`ListenerWorker.java`)
+**6. ListenerWorker** (`ListenerWorker.java`)
 - Alternative, simpler listener implementation
 - Uses automatic acknowledgment mode
 - Handles message_type routing (alerts and queries only)
 - Suitable for less critical processing scenarios
 - Uses ConfigLoader for RabbitMQ connection settings
 
-**6. AlertProcessor** (`AlertProcessor.java`)
+**7. AlertProcessor** (`AlertProcessor.java`)
 - Reads JSON files from `messages/` directory (configurable via config.properties)
-- Publishes messages to RabbitMQ queue
+- Publishes messages to RabbitMQ queue (one-time run)
 - Ensures all messages have `message_type` field (defaults to "alert")
 - Uses relative paths for cross-platform compatibility
 - Uses ConfigLoader for all settings
 
-**7. QueryDemo** (`QueryDemo.java`)
+**8. QueryDemo** (`QueryDemo.java`)
 - Queries PostgreSQL for alerts matching a severity level
 - Exports results to `query_responses/` directory as individual JSON files
 - Adds `message_type: query_response` to exported files
@@ -238,7 +269,7 @@ Message Files (JSON) → AlertProcessor → alerts_queue (RabbitMQ)
 - Requires severity parameter as command-line argument
 - Uses ConfigLoader for all settings
 
-**8. DatabaseUtil** (`DatabaseUtil.java`)
+**9. DatabaseUtil** (`DatabaseUtil.java`)
 - Legacy database connection utility (not currently used)
 - Kept for documentation and potential future use
 
@@ -379,18 +410,37 @@ SELECT * FROM wazuh_alerts WHERE payload->>'alert_type' = 'ransomware_detection'
    cp config.properties.example config.properties
    # Edit config.properties if needed
    ```
-4. **Run RabbitMQListener** in one terminal:
+4. **Run ThreatContextStoreMain** (starts everything):
    ```bash
-   java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+   java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
    ```
-5. **Run AlertProcessor** in another terminal to send test alerts:
+   This will:
+   - Process all existing files in `messages/`
+   - Start listening for RabbitMQ messages
+   - Watch for new files in `messages/` directory
+
+5. **Add new alert files** (in another terminal while ThreatContextStoreMain is running):
    ```bash
-   java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+   # Copy a test file
+   cp messages/alert_1.json messages/test_alert.json
+   # It will be automatically processed!
    ```
+
 6. **Verify insertion** with QueryDemo or direct SQL queries:
    ```bash
    java -cp "out:lib/*" com.yourorg.middleware.QueryDemo high
    ```
+
+**Alternative: Run Components Separately**
+
+If you need to run components individually:
+```bash
+# Terminal 1: Start listener
+java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+
+# Terminal 2: Process files once
+java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+```
 
 ### Message Processing Guarantees
 - `RabbitMQListener` uses manual ACK for at-least-once delivery
