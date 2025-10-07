@@ -174,9 +174,20 @@ public class RabbitMQListener {
             System.out.println("   Found " + results.size() + " results");
             
             // Create output directory
-            File outputDir = new File(ConfigLoader.getQueryResponsesPath());
+            String outputPath = ConfigLoader.getQueryResponsesPath();
+            File outputDir = new File(outputPath);
+            System.out.println("   📁 Query responses directory: " + outputDir.getAbsolutePath());
+            
             if (!outputDir.exists()) {
-                outputDir.mkdirs();
+                System.out.println("   📁 Directory doesn't exist, creating...");
+                boolean created = outputDir.mkdirs();
+                if (created) {
+                    System.out.println("   ✓ Directory created successfully");
+                } else {
+                    System.err.println("   ⚠️  Failed to create directory!");
+                }
+            } else {
+                System.out.println("   ✓ Directory already exists");
             }
             
             // Send each result as query_response to RabbitMQ and save to file
@@ -187,12 +198,22 @@ public class RabbitMQListener {
                 
                 // Send to query_response_queue
                 channel.basicPublish("", QUERY_RESPONSE_QUEUE, null, result.toString().getBytes("UTF-8"));
+                System.out.println("   📤 Sent to query_response_queue");
                 
                 // Write to file
                 String eventId = result.getString("event_id");
                 File outFile = new File(outputDir, eventId + ".json");
+                System.out.println("   💾 Saving to file: " + outFile.getAbsolutePath());
+                
                 try (FileWriter writer = new FileWriter(outFile)) {
                     writer.write(result.toString(4)); // pretty-print
+                    writer.flush();
+                }
+                
+                if (outFile.exists()) {
+                    System.out.println("   ✓ File saved successfully (" + outFile.length() + " bytes)");
+                } else {
+                    System.err.println("   ⚠️  File was not created!");
                 }
                 
                 successCount++;
