@@ -1,0 +1,19 @@
+# Configuration files with sensitive credentials
+config.properties
+
+# Compiled class files
+out/
+*.class
+
+# Query response files
+query_responses/*.json
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+

@@ -1,7 +1,0 @@
-{
-    "event_id": "8208facb-c7fc-494a-8b78-24b21c65543f",
-    "event_type": "alerts.host.wazuh",
-    "source_module": "WazuhConnector",
-    "payload": {"severity": "high"},
-    "timestamp": "2025-07-21T10:37:12Z"
-}

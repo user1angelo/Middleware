@@ -1,12 +1,19 @@
 DROP TABLE IF EXISTS wazuh_alerts;
 
 CREATE TABLE wazuh_alerts (
-    log_id TEXT PRIMARY KEY,        -- new unique key: tsWithMillis_eventType_UUID
-    event_id TEXT NOT NULL,         -- original event_id from JSON
-    timestamp TIMESTAMPTZ NOT NULL,
-    event_type TEXT NOT NULL,
-    source_module TEXT NOT NULL,
-    payload JSONB NOT NULL
+    event_id UUID PRIMARY KEY,              -- unique event identifier
+    message_type VARCHAR(50) NOT NULL,      -- message type: alert, query, query_response
+    timestamp TIMESTAMPTZ NOT NULL,         -- event timestamp
+    event_type VARCHAR(255) NOT NULL,       -- event classification
+    source_module VARCHAR(255) NOT NULL,    -- source system identifier
+    payload JSONB NOT NULL,                 -- flexible JSON data
+    response_count INTEGER DEFAULT 0,       -- for queries: number of responses sent
+    response_status VARCHAR(50) DEFAULT 'pending'  -- for queries: success, failed, pending
 );
 
-GRANT ALL PRIVILEGES ON TABLE wazuh_alerts TO alerts_user;
+-- Create indexes for better query performance
+CREATE INDEX idx_wazuh_alerts_message_type ON wazuh_alerts(message_type);
+CREATE INDEX idx_wazuh_alerts_timestamp ON wazuh_alerts(timestamp);
+CREATE INDEX idx_wazuh_alerts_payload ON wazuh_alerts USING GIN(payload);
+
+GRANT ALL PRIVILEGES ON TABLE wazuh_alerts TO postgres;

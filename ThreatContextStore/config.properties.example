@@ -1,0 +1,19 @@
+# Database Configuration
+db.host=192.168.86.28
+db.port=5432
+db.name=wazuhdb
+db.user=postgres
+db.password=postgres
+
+# RabbitMQ Configuration
+rabbitmq.host=192.168.86.76
+rabbitmq.port=5672
+rabbitmq.user=guest
+rabbitmq.password=guest
+rabbitmq.queue.name=alerts_queue
+rabbitmq.query_response_queue.name=query_response_queue
+
+# File Paths (relative to ThreatContextStore directory)
+paths.messages=messages
+paths.query_responses=query_responses
+

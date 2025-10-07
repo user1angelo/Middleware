@@ -6,11 +6,11 @@ import java.nio.charset.StandardCharsets;
 
 public class ListenerWorker {
 
-    private static final String QUEUE_NAME = "alerts_queue";
-    private static final String RABBIT_HOST = "192.168.86.76";
-    private static final int RABBIT_PORT = 5672;
-    private static final String RABBIT_USER = "guest";
-    private static final String RABBIT_PASS = "guest";
+    private static final String QUEUE_NAME = ConfigLoader.getRabbitMqQueueName();
+    private static final String RABBIT_HOST = ConfigLoader.getRabbitMqHost();
+    private static final int RABBIT_PORT = ConfigLoader.getRabbitMqPort();
+    private static final String RABBIT_USER = ConfigLoader.getRabbitMqUser();
+    private static final String RABBIT_PASS = ConfigLoader.getRabbitMqPassword();
 
     public static void main(String[] args) throws Exception {
         ConnectionFactory factory = new ConnectionFactory();
@@ -31,11 +31,18 @@ public class ListenerWorker {
         DeliverCallback deliverCallback = (consumerTag, delivery) -> {
             String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
             try {
-                JSONObject alert = new JSONObject(message);
-                dao.insertAlert(alert); // insert into Postgres if not duplicate
-                System.out.println("✅ Inserted alert: " + alert.optString("event_id"));
+                JSONObject json = new JSONObject(message);
+                String messageType = json.optString("message_type", "alert");
+                
+                // Only store alerts and queries (not query_response)
+                if (!messageType.equals("query_response")) {
+                    dao.insertMessage(json); // insert into Postgres if not duplicate
+                    System.out.println("✅ Stored " + messageType + ": " + json.optString("event_id"));
+                } else {
+                    System.out.println("📥 Received query_response: " + json.optString("event_id") + " (not stored)");
+                }
             } catch (Exception e) {
-                System.err.println("⚠ Failed to insert alert: " + e.getMessage());
+                System.err.println("⚠ Failed to process message: " + e.getMessage());
                 e.printStackTrace();
             }
         };

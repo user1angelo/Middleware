@@ -10,7 +10,7 @@ import org.json.JSONObject;
 
 public class QueryDemo {
 
-    private static final String QUEUE_NAME = "alerts_queue";
+    private static final String QUEUE_NAME = ConfigLoader.getRabbitMqQueueName();
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
@@ -29,18 +29,18 @@ public class QueryDemo {
             return;
         }
 
-        // Create output folder
-        File outputDir = new File("output");
+        // Create query_responses folder
+        File outputDir = new File(ConfigLoader.getQueryResponsesPath());
         if (!outputDir.exists()) {
             outputDir.mkdirs();
         }
 
         // Setup RabbitMQ connection (optional)
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("192.168.86.76");
-        factory.setPort(5672);
-        factory.setUsername("guest");
-        factory.setPassword("guest");
+        factory.setHost(ConfigLoader.getRabbitMqHost());
+        factory.setPort(ConfigLoader.getRabbitMqPort());
+        factory.setUsername(ConfigLoader.getRabbitMqUser());
+        factory.setPassword(ConfigLoader.getRabbitMqPassword());
 
         Connection rabbitConn = null;
         Channel channel = null;
@@ -57,6 +57,11 @@ public class QueryDemo {
         // Export alerts to JSON files and optionally to RabbitMQ
         int count = 0;
         for (JSONObject alert : alerts) {
+            // Ensure message_type is present
+            if (!alert.has("message_type")) {
+                alert.put("message_type", "query_response");
+            }
+            
             String eventId = alert.getString("event_id");
             File outFile = new File(outputDir, eventId + ".json");
 

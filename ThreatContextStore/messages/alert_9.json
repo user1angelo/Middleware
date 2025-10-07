@@ -16,5 +16,6 @@
     "destination_ip": "10.0.0.9",
     "protocol": "TCP",
     "threat_score": 66
-  }
+  },
+  "message_type": "alert"
 }

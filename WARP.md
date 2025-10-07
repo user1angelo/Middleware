@@ -4,7 +4,71 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-This is a Java-based middleware system that bridges RabbitMQ message queues with PostgreSQL for security alert processing. It receives Wazuh security alerts from RabbitMQ, processes them, and stores them in a PostgreSQL database for querying and analysis.
+This is a Java-based middleware system that bridges RabbitMQ message queues with PostgreSQL for security alert processing. It provides a message-type based routing system that handles alerts, queries, and query responses.
+
+**Key Features:**
+- **Three message types**: `alert`, `query`, `query_response`
+- **Dynamic query translation**: JSON queries converted to SQL
+- **Dual-queue system**: Separate queues for alerts and query responses
+- **UUID-based event tracking**: Proper UUID support for event_id
+- **Query execution tracking**: Stores query status and response counts
+
+**Project Structure:**
+```
+Middleware/
+├── WARP.md
+└── ThreatContextStore/          # Main application directory
+    ├── src/main/java/com/yourorg/middleware/
+    ├── lib/                      # JAR dependencies
+    ├── messages/                 # Input JSON message files
+    ├── query_responses/          # Query response output files
+    ├── out/                      # Compiled class files
+    ├── config.properties.example # Configuration template
+    ├── config.properties         # Your local config (git-ignored)
+    └── schema.sql                # Database schema
+```
+
+## Configuration
+
+### Initial Setup
+
+1. **Navigate to the project directory:**
+   ```bash
+   cd ThreatContextStore
+   ```
+
+2. **Create your configuration file:**
+   ```bash
+   cp config.properties.example config.properties
+   ```
+
+3. **Edit `config.properties`** to match your environment:
+   - Database host, port, credentials
+   - RabbitMQ host, port, credentials
+   - File paths (if different from defaults)
+
+**Note:** The application will use default values if `config.properties` is not found, but creating one is recommended for clarity.
+
+### Configuration Options
+
+**Database Configuration:**
+- `db.host` - PostgreSQL server hostname (default: `192.168.86.28`)
+- `db.port` - PostgreSQL port (default: `5432`)
+- `db.name` - Database name (default: `wazuhdb`)
+- `db.user` - Database username (default: `postgres`)
+- `db.password` - Database password (default: `postgres`)
+
+**RabbitMQ Configuration:**
+- `rabbitmq.host` - RabbitMQ server hostname (default: `192.168.86.76`)
+- `rabbitmq.port` - RabbitMQ port (default: `5672`)
+- `rabbitmq.user` - RabbitMQ username (default: `guest`)
+- `rabbitmq.password` - RabbitMQ password (default: `guest`)
+- `rabbitmq.queue.name` - Main queue for alerts/queries (default: `alerts_queue`)
+- `rabbitmq.query_response_queue.name` - Queue for query responses (default: `query_response_queue`)
+
+**File Paths:**
+- `paths.messages` - Directory for input JSON files (default: `messages`)
+- `paths.query_responses` - Directory for query response output (default: `query_responses`)
 
 ## Build and Run Commands
 
@@ -19,16 +83,19 @@ This is a Java-based middleware system that bridges RabbitMQ message queues with
   - `slf4j-api-2.0.17.jar` and `slf4j-simple-2.0.17.jar` (logging)
 
 ### Compile the Project
+
+**Important:** Always run commands from the `ThreatContextStore/` directory.
+
 ```bash
-javac -cp "lib/*" -d out src/main/java/com/yourorg/middleware/*.java
+cd ThreatContextStore
 ```
 
-**On Linux/macOS**, use colon separator:
+**On Linux/macOS:**
 ```bash
 javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
 ```
 
-**On Windows**, use semicolon separator:
+**On Windows:**
 ```bash
 javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
 ```
@@ -75,9 +142,9 @@ java -cp "out;lib/*" com.yourorg.middleware.ListenerWorker
 
 ### Database Setup
 
-Initialize the PostgreSQL database:
+Initialize the PostgreSQL database from the `ThreatContextStore/` directory:
 ```bash
-psql -U postgres -f middlewaresender-latest/middlewaresender-main/schema.sql
+psql -U postgres -f schema.sql
 ```
 
 Or manually create the database:
@@ -95,90 +162,204 @@ GRANT ALL PRIVILEGES ON DATABASE wazuhdb TO postgres;
 
 **Message Flow Pipeline:**
 ```
-Alert Files (JSON) → AlertProcessor → RabbitMQ Queue → RabbitMQListener/ListenerWorker → PostgreSQL
-                                            ↓
-                                      QueryDemo ← PostgreSQL
+Message Files (JSON) → AlertProcessor → alerts_queue (RabbitMQ)
+                                              ↓
+                                    RabbitMQListener
+                                    (routes by message_type)
+                                              ↓
+                        ┌─────────────┬───────────────┐
+              alert │         query │   query_response │
+                        │               │                 │
+                        v               v                 v
+                 Store in DB   Execute Query      Log only
+                                      │           (not stored)
+                                      v
+                            Generate responses
+                                      │
+                        ┌─────────────┴───────────────┐
+                        │                               │
+                        v                               v
+          query_response_queue            query_responses/
+               (RabbitMQ)                  (JSON files)
 ```
 
 ### Key Classes
 
-**1. WazuhAlertDao** (`WazuhAlertDao.java`)
+**1. ConfigLoader** (`ConfigLoader.java`)
+- Central configuration management
+- Reads from `config.properties` with fallback to defaults
+- Provides type-safe getters for all configuration values
+- Used by all components for consistent configuration
+
+**2. WazuhAlertDao** (`WazuhAlertDao.java`)
 - Data Access Object for PostgreSQL operations
-- Handles alert insertion with duplicate detection (checks `event_id`)
+- Handles message insertion with duplicate detection (checks `event_id`)
+- Stores alerts and queries (not query_responses)
 - Provides query methods to fetch alerts by severity from JSONB payload
-- Database connection: `192.168.86.28:5432/wazuhdb`
+- Executes dynamic SQL queries from translated JSON
+- Tracks query execution status (response_count, response_status)
+- Uses ConfigLoader for database connection settings
 
-**2. RabbitMQListener** (`RabbitMQListener.java`)
+**3. QueryTranslator** (`QueryTranslator.java`)
+- Translates JSON query messages into SQL queries
+- Builds WHERE clauses from JSON filters
+- Supports ordering, limiting, and JSONB field queries
+- Returns SQL string and parameterized values
+
+**4. RabbitMQListener** (`RabbitMQListener.java`)
 - Primary consumer implementation with robust error handling
-- Connects to RabbitMQ at `192.168.86.76:5672`
+- Routes messages based on `message_type` field:
+  - **alert**: Store in database
+  - **query**: Execute query, generate responses, send to `query_response_queue`
+  - **query_response**: Log only (not stored)
 - Uses manual acknowledgment (ACK/NACK) for reliable message processing
-- Flattens nested `payload` objects before database insertion
 - Includes graceful shutdown hooks
+- Uses ConfigLoader for RabbitMQ connection settings
 
-**3. ListenerWorker** (`ListenerWorker.java`)
+**5. ListenerWorker** (`ListenerWorker.java`)
 - Alternative, simpler listener implementation
 - Uses automatic acknowledgment mode
+- Handles message_type routing (alerts and queries only)
 - Suitable for less critical processing scenarios
+- Uses ConfigLoader for RabbitMQ connection settings
 
-**4. AlertProcessor** (`AlertProcessor.java`)
-- Reads JSON files from `messages/` directory
-- Publishes each alert to RabbitMQ queue `alerts_queue`
-- Currently hardcoded to Windows path: `D:\Users\Angelo\Downloads\middlewaresender-latest\middlewaresender-main\messages`
-- **Note**: Update this path when running on different systems
+**6. AlertProcessor** (`AlertProcessor.java`)
+- Reads JSON files from `messages/` directory (configurable via config.properties)
+- Publishes messages to RabbitMQ queue
+- Ensures all messages have `message_type` field (defaults to "alert")
+- Uses relative paths for cross-platform compatibility
+- Uses ConfigLoader for all settings
 
-**5. QueryDemo** (`QueryDemo.java`)
+**7. QueryDemo** (`QueryDemo.java`)
 - Queries PostgreSQL for alerts matching a severity level
-- Exports results to `output/` directory as individual JSON files
+- Exports results to `query_responses/` directory as individual JSON files
+- Adds `message_type: query_response` to exported files
 - Optionally republishes alerts back to RabbitMQ
 - Requires severity parameter as command-line argument
+- Uses ConfigLoader for all settings
 
-**6. DatabaseUtil** (`DatabaseUtil.java`)
-- Provides database connection pooling utility
-- Configured for local PostgreSQL: `localhost:5432/alertsdb`
-- **Note**: This class uses different database credentials than `WazuhAlertDao`
+**8. DatabaseUtil** (`DatabaseUtil.java`)
+- Legacy database connection utility (not currently used)
+- Kept for documentation and potential future use
 
 ### Database Schema
 
 The `wazuh_alerts` table stores:
-- `log_id` (TEXT, PRIMARY KEY): Composite key with timestamp, event type, and UUID
-- `event_id` (TEXT, NOT NULL): Original event UUID from JSON
-- `timestamp` (TIMESTAMPTZ): Alert timestamp
-- `event_type` (TEXT): Event classification
-- `source_module` (TEXT): Source system identifier
-- `payload` (JSONB): Full alert data stored as JSON for flexible querying
+- `event_id` (UUID, PRIMARY KEY): Unique event identifier
+- `message_type` (VARCHAR, NOT NULL): Message type (`alert`, `query`, `query_response`)
+- `timestamp` (TIMESTAMPTZ, NOT NULL): Event timestamp
+- `event_type` (VARCHAR, NOT NULL): Event classification
+- `source_module` (VARCHAR, NOT NULL): Source system identifier
+- `payload` (JSONB, NOT NULL): Full alert data stored as JSON for flexible querying
+- `response_count` (INTEGER, DEFAULT 0): For queries - number of responses sent
+- `response_status` (VARCHAR, DEFAULT 'pending'): For queries - `pending`, `success`, `failed`
 
-### Configuration Differences
+**Indexes:**
+- `idx_wazuh_alerts_message_type` - For filtering by message type
+- `idx_wazuh_alerts_timestamp` - For time-range queries
+- `idx_wazuh_alerts_payload` (GIN) - For fast JSONB queries
 
-**Important**: The codebase has inconsistent configuration across components:
+### Message Types
 
-1. **Database Connections:**
-   - `WazuhAlertDao`: Uses `192.168.86.28:5432/wazuhdb` with `postgres/postgres`
-   - `DatabaseUtil`: Uses `localhost:5432/alertsdb` with `alerts_user/alertspass`
+**1. Alert Messages** (`message_type: "alert"`)
+- Security alerts from Wazuh or other sources
+- Stored in database for analysis
+- Example structure:
+```json
+{
+  "message_type": "alert",
+  "event_id": "uuid",
+  "timestamp": "2025-10-07T01:00:00Z",
+  "event_type": "alerts.host.wazuh",
+  "source_module": "WazuhConnector",
+  "payload": {
+    "severity": "high",
+    "alert_type": "ransomware_detection",
+    "host_id": "host-192.168.1.101",
+    ...
+  }
+}
+```
 
-2. **RabbitMQ Connections:**
-   - All components use `192.168.86.76:5672` with `guest/guest` credentials
-   - Queue name: `alerts_queue` (consistent across all components)
+**2. Query Messages** (`message_type: "query"`)
+- Request to query the database
+- Stored in database with execution status
+- Triggers SQL query execution
+- Results sent as individual `query_response` messages
+- Example structure:
+```json
+{
+  "message_type": "query",
+  "event_id": "query-uuid",
+  "timestamp": "2025-10-07T01:00:00Z",
+  "event_type": "query.request",
+  "source_module": "AdminConsole",
+  "payload": {
+    "filters": {
+      "severity": "high",
+      "alert_type": "ransomware_detection"
+    },
+    "order_by": "timestamp",
+    "order_direction": "DESC",
+    "limit": 100
+  }
+}
+```
 
-3. **File Paths:**
-   - `AlertProcessor` has hardcoded Windows path that needs updating for cross-platform use
+**3. Query Response Messages** (`message_type: "query_response"`)
+- Individual results from a query
+- Sent to `query_response_queue` on RabbitMQ
+- Written to `query_responses/{event_id}.json` files
+- **NOT** stored in database (logged only)
+- Example structure:
+```json
+{
+  "message_type": "query_response",
+  "event_id": "original-alert-uuid",
+  "timestamp": "2025-07-21T10:36:12Z",
+  "event_type": "alerts.host.wazuh",
+  "source_module": "WazuhConnector",
+  "payload": {
+    "severity": "high",
+    ...
+  }
+}
+```
 
-When working with this codebase, ensure these configurations match your environment.
+### Configuration Management
+
+All configuration is now centralized through `ConfigLoader.java` and `config.properties`:
+
+- **Single source of truth**: All components use ConfigLoader for settings
+- **No hardcoded values**: All connection strings and paths are configurable
+- **Cross-platform**: Uses relative paths that work on any OS
+- **Fallback defaults**: Application works even without config.properties file
+
+**Note:** `DatabaseUtil.java` is a legacy file with different configuration and is not actively used by the application.
 
 ## Development Workflow
 
-### Adding New Alert Types
-1. Add sample JSON to `messages/` directory following the schema pattern:
-   - `event_id`: UUID
-   - `timestamp`: ISO 8601 format
-   - `event_type`: Alert classification
-   - `source_module`: Source identifier
-   - `payload`: JSONB object with alert details (including `severity` field)
+### Working with Messages
 
-2. The payload structure is flexible but commonly includes:
-   - `severity`: Used for filtering queries
-   - `host_id`, `alert_type`, `signature_id`, `signature`
-   - Network details: `source_ip`, `destination_ip`, `protocol`
-   - File/process information as needed
+**All messages must include:**
+- `message_type`: `"alert"`, `"query"`, or `"query_response"`
+- `event_id`: UUID string
+- `timestamp`: ISO 8601 format
+- `event_type`: Event classification
+- `source_module`: Source identifier
+- `payload`: JSONB object with message-specific data
+
+**Alert Payload Structure** (flexible, commonly includes):
+- `severity`: Used for filtering queries
+- `host_id`, `alert_type`, `signature_id`, `signature`
+- Network details: `source_ip`, `destination_ip`, `protocol`
+- File/process information as needed
+
+**Query Payload Structure**:
+- `filters`: Object with field/value pairs to query
+- `order_by`: Field to sort by (default: `timestamp`)
+- `order_direction`: `DESC` or `ASC` (default: `DESC`)
+- `limit`: Maximum results (default: 100)
 
 ### Querying JSONB Fields
 PostgreSQL JSONB queries use the `->>` operator for text extraction:
@@ -188,11 +369,28 @@ SELECT * FROM wazuh_alerts WHERE payload->>'alert_type' = 'ransomware_detection'
 ```
 
 ### Testing the Pipeline
-1. Start RabbitMQ server
-2. Start PostgreSQL database
-3. Run `RabbitMQListener` in one terminal
-4. Run `AlertProcessor` to send test alerts
-5. Verify insertion with `QueryDemo` or direct SQL queries
+
+**All commands assume you're in the `ThreatContextStore/` directory.**
+
+1. **Start RabbitMQ server** (on 192.168.86.76 or configure in config.properties)
+2. **Start PostgreSQL database** (on 192.168.86.28 or configure in config.properties)
+3. **Ensure config.properties exists:**
+   ```bash
+   cp config.properties.example config.properties
+   # Edit config.properties if needed
+   ```
+4. **Run RabbitMQListener** in one terminal:
+   ```bash
+   java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+   ```
+5. **Run AlertProcessor** in another terminal to send test alerts:
+   ```bash
+   java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+   ```
+6. **Verify insertion** with QueryDemo or direct SQL queries:
+   ```bash
+   java -cp "out:lib/*" com.yourorg.middleware.QueryDemo high
+   ```
 
 ### Message Processing Guarantees
 - `RabbitMQListener` uses manual ACK for at-least-once delivery

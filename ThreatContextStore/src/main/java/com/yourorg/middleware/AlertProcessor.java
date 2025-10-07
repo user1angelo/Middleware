@@ -11,12 +11,12 @@ import com.rabbitmq.client.ConnectionFactory;
 import org.json.JSONObject;
 
 public class AlertProcessor {
-    private static final String QUEUE_NAME = "alerts_queue";
+    private static final String QUEUE_NAME = ConfigLoader.getRabbitMqQueueName();
 
     public static void main(String[] args) throws Exception {
 
-        // Hardcoded folder path
-        File folder = new File("D:\\Users\\Angelo\\Downloads\\middlewaresender-latest\\middlewaresender-main\\messages");
+        // Use relative path from config
+        File folder = new File(ConfigLoader.getMessagesPath());
         if (!folder.exists() || !folder.isDirectory()) {
             System.out.println("Invalid folder path: " + folder.getAbsolutePath());
             return;
@@ -24,10 +24,10 @@ public class AlertProcessor {
 
         // Connect to RabbitMQ
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("192.168.86.76");
-        factory.setPort(5672);
-        factory.setUsername("guest");
-        factory.setPassword("guest");
+        factory.setHost(ConfigLoader.getRabbitMqHost());
+        factory.setPort(ConfigLoader.getRabbitMqPort());
+        factory.setUsername(ConfigLoader.getRabbitMqUser());
+        factory.setPassword(ConfigLoader.getRabbitMqPassword());
 
         try (Connection connection = factory.newConnection();
              Channel channel = connection.createChannel()) {
@@ -42,8 +42,13 @@ public class AlertProcessor {
                     String content = Files.readString(file.toPath());
                     JSONObject json = new JSONObject(content);
 
+                    // Ensure message_type is present (default to "alert")
+                    if (!json.has("message_type")) {
+                        json.put("message_type", "alert");
+                    }
+
                     channel.basicPublish("", QUEUE_NAME, null, json.toString().getBytes("UTF-8"));
-                    System.out.println("✅ Sent " + file.getName() + " to RabbitMQ.");
+                    System.out.println("✅ Sent " + file.getName() + " to RabbitMQ (type: " + json.getString("message_type") + ")");
                 } catch (Exception e) {
                     System.out.println("⚠ Failed to send " + file.getName());
                     e.printStackTrace();

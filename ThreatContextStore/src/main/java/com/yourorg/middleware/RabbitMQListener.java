@@ -2,17 +2,22 @@ package com.yourorg.middleware;
 
 import com.rabbitmq.client.*;
 import org.json.JSONObject;
+import java.io.File;
+import java.io.FileWriter;
 import java.util.Iterator;
+import java.util.List;
+import java.util.UUID;
 
 /**
- * Dedicated RabbitMQ listener that consumes alerts and stores them in PostgreSQL
+ * Dedicated RabbitMQ listener that consumes messages and processes them based on message_type
  */
 public class RabbitMQListener {
-    private static final String QUEUE_NAME = "alerts_queue";
-    private static final String RABBITMQ_HOST = "192.168.86.76";
-    private static final int RABBITMQ_PORT = 5672;
-    private static final String RABBITMQ_USER = "guest";
-    private static final String RABBITMQ_PASSWORD = "guest";
+    private static final String QUEUE_NAME = ConfigLoader.getRabbitMqQueueName();
+    private static final String QUERY_RESPONSE_QUEUE = ConfigLoader.getRabbitMqQueryResponseQueueName();
+    private static final String RABBITMQ_HOST = ConfigLoader.getRabbitMqHost();
+    private static final int RABBITMQ_PORT = ConfigLoader.getRabbitMqPort();
+    private static final String RABBITMQ_USER = ConfigLoader.getRabbitMqUser();
+    private static final String RABBITMQ_PASSWORD = ConfigLoader.getRabbitMqPassword();
 
     private final WazuhAlertDao dao;
     private Connection connection;
@@ -35,8 +40,9 @@ public class RabbitMQListener {
         connection = factory.newConnection();
         channel = connection.createChannel();
 
-        // Declare queue (idempotent - creates only if doesn't exist)
+        // Declare queues (idempotent - creates only if doesn't exist)
         channel.queueDeclare(QUEUE_NAME, true, false, false, null);
+        channel.queueDeclare(QUERY_RESPONSE_QUEUE, true, false, false, null);
         
         // Set prefetch to process one message at a time
         channel.basicQos(1);
@@ -50,14 +56,22 @@ public class RabbitMQListener {
                 String message = new String(delivery.getBody(), "UTF-8");
                 JSONObject json = new JSONObject(message);
 
-                // Flatten nested payload if present
-                flattenPayload(json);
+                // Route based on message_type
+                String messageType = json.optString("message_type", "alert");
                 
-                // Insert into PostgreSQL
-                dao.insertAlert(json);
-
-                System.out.println("🔥 Inserted alert: " + json.optString("rule_id", "unknown") 
-                    + " | Severity: " + json.optString("severity", "unknown"));
+                switch (messageType) {
+                    case "alert":
+                        handleAlert(json);
+                        break;
+                    case "query":
+                        handleQuery(json);
+                        break;
+                    case "query_response":
+                        handleQueryResponse(json);
+                        break;
+                    default:
+                        System.err.println("⚠ Unknown message_type: " + messageType);
+                }
                 
                 // Acknowledge message
                 channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
@@ -81,18 +95,76 @@ public class RabbitMQListener {
     }
 
     /**
-     * Flatten nested "payload" JSON object into root level
+     * Handle alert message: store in database
      */
-    private void flattenPayload(JSONObject json) {
-        if (json.has("payload")) {
-            JSONObject payload = json.getJSONObject("payload");
-            Iterator<String> keys = payload.keys();
-            while (keys.hasNext()) {
-                String key = keys.next();
-                json.put(key, payload.get(key));
+    private void handleAlert(JSONObject alert) throws Exception {
+        dao.insertMessage(alert);
+        JSONObject payload = alert.optJSONObject("payload");
+        String severity = payload != null ? payload.optString("severity", "unknown") : "unknown";
+        System.out.println("🔥 Stored alert: " + alert.optString("event_id") + " | Severity: " + severity);
+    }
+
+    /**
+     * Handle query message: execute query, send results back to RabbitMQ, update query status
+     */
+    private void handleQuery(JSONObject query) throws Exception {
+        String queryId = query.optString("event_id", UUID.randomUUID().toString());
+        System.out.println("🔍 Processing query: " + queryId);
+        
+        try {
+            // Store query in database
+            dao.insertMessage(query);
+            
+            // Translate query to SQL
+            QueryTranslator.QueryResult queryResult = QueryTranslator.translate(query);
+            System.out.println("   SQL: " + queryResult.getSql());
+            
+            // Execute query
+            List<JSONObject> results = dao.executeQuery(queryResult.getSql(), queryResult.getParameters());
+            System.out.println("   Found " + results.size() + " results");
+            
+            // Create output directory
+            File outputDir = new File(ConfigLoader.getQueryResponsesPath());
+            if (!outputDir.exists()) {
+                outputDir.mkdirs();
             }
-            json.remove("payload");
+            
+            // Send each result as query_response to RabbitMQ and save to file
+            int successCount = 0;
+            for (JSONObject result : results) {
+                // Change message_type to query_response
+                result.put("message_type", "query_response");
+                
+                // Send to query_response_queue
+                channel.basicPublish("", QUERY_RESPONSE_QUEUE, null, result.toString().getBytes("UTF-8"));
+                
+                // Write to file
+                String eventId = result.getString("event_id");
+                File outFile = new File(outputDir, eventId + ".json");
+                try (FileWriter writer = new FileWriter(outFile)) {
+                    writer.write(result.toString(4)); // pretty-print
+                }
+                
+                successCount++;
+            }
+            
+            // Update query with response summary
+            dao.updateQueryResponse(UUID.fromString(queryId), successCount, "success");
+            System.out.println("✅ Sent " + successCount + " query responses");
+            
+        } catch (Exception e) {
+            // Update query status as failed
+            dao.updateQueryResponse(UUID.fromString(queryId), 0, "failed");
+            throw e;
         }
+    }
+
+    /**
+     * Handle query_response message: just log it (not stored in database)
+     */
+    private void handleQueryResponse(JSONObject queryResponse) {
+        String eventId = queryResponse.optString("event_id", "unknown");
+        System.out.println("📥 Received query_response: " + eventId + " (not stored)");
     }
 
     /**
