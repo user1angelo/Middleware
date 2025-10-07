@@ -1,0 +1,20 @@
+{
+  "event_id": "09bb92d5-86ed-4076-895f-18bb71f1970d",
+  "timestamp": "2025-07-21T10:39:12Z",
+  "event_type": "alerts.host.wazuh",
+  "source_module": "WazuhConnector",
+  "payload": {
+    "host_id": "host-192.168.1.104",
+    "alert_type": "ransomware_detection",
+    "signature_id": "9201004",
+    "signature": "Suspicious file encryption activity",
+    "severity": "low",
+    "process": "C:\\\\Users\\\\User4\\\\AppData\\\\Local\\\\Temp\\\\malware.exe",
+    "file_path": "C:\\\\Users\\\\User4\\\\Documents\\\\file4.docx",
+    "matched_rule": "yara_ransomnote_heuristic",
+    "source_ip": "192.168.1.104",
+    "destination_ip": "10.0.0.4",
+    "protocol": "TCP",
+    "threat_score": 50
+  }
+}
