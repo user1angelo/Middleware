@@ -77,6 +77,7 @@ Limit (default: 10): 5
 ## Random Alert Fields
 
 The tester generates random alerts with:
+- **Timestamps**: Current time in Manila timezone (GMT+8)
 - **Severities**: high, medium, low, critical
 - **Alert Types**: ransomware_detection, malware_execution, intrusion_attempt, ddos_attack, data_exfiltration, privilege_escalation, brute_force_attack, sql_injection, xss_attack, command_injection
 - **Random IPs**: 192.168.x.x, 10.0.x.x ranges
@@ -94,7 +95,7 @@ The tester generates random alerts with:
 2. **Queries**: Sent to RabbitMQ `alerts_queue` with `message_type: "query"`
    - ThreatContextStore executes the query
    - Sends each result as `query_response` to `query_response_queue`
-   - Writes responses to `query_responses/` directory
+   - Writes responses to `ThreatContextStore/query_responses/` directory as `{event_id}.json` files
 
 ## Testing ThreatContextStore
 
@@ -126,8 +127,10 @@ The tester generates random alerts with:
 
 ## Notes
 
+- All messages use **Manila timezone (GMT+8)** for timestamps
 - All alerts have `source_module: "TCSTester"` for easy identification
 - 0.5 second delay between each alert to avoid overwhelming the system
-- Query responses are written to ThreatContextStore's `query_responses/` directory
-- This directory's `query_responses/` is just a placeholder
+- Query responses are written to **ThreatContextStore's** `query_responses/` directory (not this directory)
+- Each query response is saved as `{event_id}.json` in `ThreatContextStore/query_responses/`
+- This directory's `query_responses/` is just a placeholder/reference
 

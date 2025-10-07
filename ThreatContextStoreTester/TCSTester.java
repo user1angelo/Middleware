@@ -3,6 +3,9 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Random;
 import java.util.Scanner;
 import java.util.UUID;
@@ -21,6 +24,10 @@ public class TCSTester {
     
     private static final Random random = new Random();
     private static final Scanner scanner = new Scanner(System.in);
+    
+    // Manila timezone (GMT+8)
+    private static final ZoneId MANILA_ZONE = ZoneId.of("Asia/Manila");
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
     
     // Random data pools
     private static final String[] SEVERITIES = {"high", "medium", "low", "critical"};
@@ -160,7 +167,7 @@ public class TCSTester {
         JSONObject alert = new JSONObject();
         alert.put("message_type", "alert");
         alert.put("event_id", UUID.randomUUID().toString());
-        alert.put("timestamp", Instant.now().toString());
+        alert.put("timestamp", getCurrentManilaTime());
         alert.put("event_type", "alerts.host.wazuh");
         alert.put("source_module", "TCSTester");
         
@@ -208,7 +215,7 @@ public class TCSTester {
         JSONObject query = new JSONObject();
         query.put("message_type", "query");
         query.put("event_id", "query-" + UUID.randomUUID().toString());
-        query.put("timestamp", Instant.now().toString());
+        query.put("timestamp", getCurrentManilaTime());
         query.put("event_type", "query.request");
         query.put("source_module", "TCSTester");
         
@@ -307,8 +314,19 @@ public class TCSTester {
             System.out.println("📋 Query ID: " + query.getString("event_id"));
             System.out.println("\n📊 Query Details:");
             System.out.println(query.toString(2));
-            System.out.println("\n💡 ThreatContextStore will process this query and send responses to query_response_queue");
+            System.out.println("\n💡 ThreatContextStore will process this query and:");
+            System.out.println("   - Send individual responses to 'query_response_queue' in RabbitMQ");
+            System.out.println("   - Save response JSON files to 'ThreatContextStore/query_responses/' directory");
+            System.out.println("   - Each response will be saved as {event_id}.json");
         }
+    }
+    
+    /**
+     * Get current time in Manila timezone (GMT+8)
+     */
+    private static String getCurrentManilaTime() {
+        ZonedDateTime manilaTime = ZonedDateTime.now(MANILA_ZONE);
+        return manilaTime.format(ISO_FORMATTER);
     }
 }
 
