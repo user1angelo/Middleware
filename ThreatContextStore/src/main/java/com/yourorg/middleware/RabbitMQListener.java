@@ -147,6 +147,20 @@ public class RabbitMQListener {
         String queryId = query.optString("event_id", UUID.randomUUID().toString());
         System.out.println("🔍 Processing query: " + queryId);
         
+        // Extract UUID from queryId (remove "query-" prefix if present)
+        UUID queryUUID;
+        try {
+            if (queryId.startsWith("query-")) {
+                // Remove "query-" prefix and parse the UUID
+                queryUUID = UUID.fromString(queryId.substring(6));
+            } else {
+                queryUUID = UUID.fromString(queryId);
+            }
+        } catch (IllegalArgumentException e) {
+            System.err.println("⚠️  Invalid UUID format in event_id: " + queryId);
+            throw new Exception("Invalid UUID format in event_id: " + queryId, e);
+        }
+        
         try {
             // Store query in database
             dao.insertMessage(query);
@@ -185,12 +199,16 @@ public class RabbitMQListener {
             }
             
             // Update query with response summary
-            dao.updateQueryResponse(UUID.fromString(queryId), successCount, "success");
+            dao.updateQueryResponse(queryUUID, successCount, "success");
             System.out.println("✅ Sent " + successCount + " query responses");
             
         } catch (Exception e) {
             // Update query status as failed
-            dao.updateQueryResponse(UUID.fromString(queryId), 0, "failed");
+            try {
+                dao.updateQueryResponse(queryUUID, 0, "failed");
+            } catch (Exception updateException) {
+                System.err.println("⚠️  Failed to update query status: " + updateException.getMessage());
+            }
             throw e;
         }
     }

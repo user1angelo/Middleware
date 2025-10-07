@@ -20,7 +20,15 @@ public class WazuhAlertDao {
 
         try (java.sql.Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
             String eventIdStr = message.optString("event_id", UUID.randomUUID().toString());
-            UUID eventId = UUID.fromString(eventIdStr);
+            
+            // Handle query IDs with "query-" prefix
+            UUID eventId;
+            if (eventIdStr.startsWith("query-")) {
+                // Remove "query-" prefix and parse the UUID
+                eventId = UUID.fromString(eventIdStr.substring(6));
+            } else {
+                eventId = UUID.fromString(eventIdStr);
+            }
 
             // Check duplicate
             String checkSql = "SELECT 1 FROM wazuh_alerts WHERE event_id = ?";
