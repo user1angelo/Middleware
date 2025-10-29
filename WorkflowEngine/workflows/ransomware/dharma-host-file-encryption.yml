@@ -1,0 +1,32 @@
+name: "Dharma Ransomware High-Confidence File Encryption Detection"
+version: 1.0
+description: >
+  Dharma ransomware encrypts files and appends distinctive extensions
+  (e.g., .dharma, .wallet, .onion). This workflow detects rapid file
+  modifications with these extensions, indicating active encryption.
+
+# --- TRIGGER ---
+trigger:
+  # Event from Wazuh HIDS detecting file system changes
+  event_type: "HOST_ALERT_WAZUH"
+  
+  # Condition checks for Dharma-specific file encryption patterns
+  condition: >
+    {{ 'Dharma Ransomware File Encryption Detected' in trigger.data.ruleDescription or
+       'Multiple files encrypted with .dharma extension' in trigger.data.ruleDescription or
+       'Rapid file modification with ransomware extension' in trigger.data.ruleDescription }}
+
+# --- STEPS ---
+steps:
+  - name: "Initiate Host Quarantine (Active Encryption)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: >
+            Critical: Dharma ransomware file encryption activity detected.
+            Host quarantined to prevent lateral spread and additional encryption.
+            Rule: {{ trigger.data.ruleDescription }}

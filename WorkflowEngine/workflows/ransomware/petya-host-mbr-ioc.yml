@@ -1,0 +1,28 @@
+name: "Petya/NotPetya High-Confidence MBR Write Detection"
+version: 1.0
+description: >
+  Triggers on a critical-severity Wazuh FIM alert for an attempt 
+  to write to the Master Boot Record (MBR). This is a hallmark of Petya.
+  Issues an immediate quarantine to stop lateral movement.
+
+# --- TRIGGER ---
+trigger:
+  # This event type is published by your Wazuh Connector [cite: 2601-2602]
+  event_type: "HOST_ALERT_WAZUH"
+  
+  # You must configure a Wazuh FIM rule to monitor \\.\PhysicalDrive0
+  # This condition checks for that specific rule's description.
+  condition: "{{ trigger.data.ruleDescription == 'Petya/NotPetya MBR Overwrite Attempt Detected' }}"
+
+# --- STEPS ---
+steps:
+  # Immediate action. The host is compromised.
+  - name: "Initiate Host Quarantine (MBR Compromise)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: "Automatic quarantine. Critical Wazuh alert: Petya MBR write detected on host."

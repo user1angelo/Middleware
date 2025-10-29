@@ -1,0 +1,26 @@
+name: "SamSam Impact Artifact Detection (Ransom Note / File Extension)"
+version: 1.0
+description: >
+  Detects SamSam impact artifacts: creation of known ransom notes 
+  or a high rate of file encryption based on extensions.
+
+# --- TRIGGER ---
+trigger:
+  event_type: "HOST_ALERT_WAZUH"
+  # Requires Wazuh FIM rules to monitor for specific filenames or patterns
+  condition: >
+    {{ trigger.data.ruleDescription == 'SamSam Ransom Note Detected' or
+       trigger.data.ruleDescription == 'High Frequency of SamSam File Encryption Detected' }} 
+       # The second rule would need frequency analysis built into Wazuh rules or the Workflow Engine
+
+# --- STEPS ---
+steps:
+  - name: "Initiate Host Quarantine (SamSam Artifacts Found)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: "Automatic quarantine. Detected SamSam impact artifacts ({{ trigger.data.ruleDescription }})."

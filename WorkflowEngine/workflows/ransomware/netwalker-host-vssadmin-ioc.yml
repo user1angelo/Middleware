@@ -1,0 +1,32 @@
+name: "Netwalker High-Confidence VSSAdmin Detection"
+version: 1.0
+description: >
+  Triggers on a critical Wazuh alert for the exact 'vssadmin delete shadows' 
+  command used by Netwalker. This is a high-confidence IOC.
+  Issues an immediate quarantine to prevent encryption and spread.
+
+# --- TRIGGER ---
+trigger:
+  # This event type is published by your Wazuh Connector
+  event_type: "HOST_ALERT_WAZUH"
+  
+  # This condition assumes you have a Wazuh rule (e.g., from Sysmon Event ID 1)
+  # that specifically parses and flags this command-line execution.
+  condition: >
+    {{ 'vssadmin.exe' in trigger.data.processName and 
+       'delete shadows' in trigger.data.commandLine and
+       '/all' in trigger.data.commandLine }}
+
+# --- STEPS ---
+steps:
+  # Immediate action to contain the compromised host.
+  - name: "Initiate Host Quarantine (VSSAdmin Delete)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        # This command is for your OpenDaylight module
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: "Automatic quarantine. Critical Wazuh alert: Netwalker 'vssadmin delete shadows' command detected."

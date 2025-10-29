@@ -1,0 +1,33 @@
+name: "Snatch Ransomware Data Exfiltration Detection"
+version: 1.0
+description: >
+  Snatch ransomware often exfiltrates data before encryption (double extortion).
+  This workflow detects large outbound data transfers to suspicious destinations,
+  providing early warning before the encryption phase begins.
+
+# --- TRIGGER ---
+trigger:
+  # Event from Suricata module detecting suspicious network traffic
+  event_type: "NIDS_ALERT"
+  
+  # Condition checks for data exfiltration indicators
+  condition: >
+    {{ 'ET POLICY Outbound Large File Transfer' in trigger.data.signature or 
+       'Suspicious Outbound Data Transfer' in trigger.data.signature or
+       'High Volume Upload to External IP' in trigger.data.signature or
+       'Data Exfiltration Detected' in trigger.data.signature }}
+
+# --- STEPS ---
+steps:
+  - name: "Initiate Immediate Host Quarantine"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: >
+            Automatic quarantine due to suspected data exfiltration activity.
+            Snatch ransomware commonly exfiltrates data before encryption.
+            Signature: {{ trigger.data.signature }}

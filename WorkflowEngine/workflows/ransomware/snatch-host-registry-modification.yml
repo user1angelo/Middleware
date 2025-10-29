@@ -1,0 +1,35 @@
+name: "Snatch Ransomware Safe Mode Boot Manipulation Detection"
+version: 1.0
+description: >
+  Snatch ransomware's signature TTP is forcing the system to boot into Safe Mode
+  to bypass security products before encryption. This workflow detects registry
+  modifications that enable automatic Safe Mode boot, which is extremely unusual
+  and a high-confidence indicator of Snatch activity.
+
+# --- TRIGGER ---
+trigger:
+  # Event from Wazuh HIDS detecting registry changes
+  event_type: "HOST_ALERT_WAZUH"
+  
+  # Condition checks for Safe Mode registry manipulation
+  condition: >
+    {{ 'Safe Mode boot registry modification detected' in trigger.data.ruleDescription or
+       'HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot modified' in trigger.data.ruleDescription or
+       'Snatch ransomware Safe Mode indicator' in trigger.data.ruleDescription or
+       'Suspicious registry change: Automatic Safe Mode boot enabled' in trigger.data.ruleDescription }}
+
+# --- STEPS ---
+steps:
+  - name: "Initiate Host Quarantine (Safe Mode Manipulation)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: >
+            Critical: Snatch ransomware Safe Mode manipulation detected.
+            Registry modified to force Safe Mode boot - a signature Snatch TTP.
+            Immediate quarantine to prevent reboot and encryption.
+            Rule: {{ trigger.data.ruleDescription }}

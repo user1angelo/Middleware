@@ -1,0 +1,41 @@
+name: "Netwalker Correlated Lateral Movement (PsExec + PS)"
+version: 1.0
+description: >
+  Triggers on suspicious PsExec execution (a lateral movement TTP). 
+  Correlates this with a suspicious PowerShell launch (the payload)
+  from the same host before quarantining to reduce false positives.
+
+# --- TRIGGER ---
+trigger:
+  event_type: "HOST_ALERT_WAZUH"
+  # This rule would detect psexec.exe or PSEXESVC.exe running
+  condition: "{{ 'PsExec Service Execution' in trigger.data.ruleDescription }}"
+
+# --- STEPS ---
+steps:
+  # STEP 1: Wait for the second, corroborating event (the payload)
+  - name: "Wait for Corroborating PowerShell Execution"
+    wait_for:
+      # We are waiting for another host alert
+      event_type: "HOST_ALERT_WAZUH"
+      # Give it a short timeout. The payload runs immediately after PsExec.
+      timeout: "1 minute"
+      conditions:
+        # Condition 1: Must be the same host
+        - "{{ new_event.data.sourceIp == trigger.data.sourceIp }}"
+        # Condition 2: Must be a suspicious PowerShell launch
+        # (Netwalker's loader is famously obfuscated and fileless)
+        - "{{ 'Suspicious PowerShell Execution (Obfuscated/Fileless)' in new_event.data.ruleDescription }}"
+
+  # STEP 2: This step only runs if the 'wait_for' succeeds
+  - name: "Initiate Correlated Host Quarantine"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: >
+            Quarantine issued. Correlated PsExec execution with 
+            a suspicious PowerShell launch. (Netwalker TTP).

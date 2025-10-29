@@ -1,0 +1,56 @@
+name: "SamSam RDP Brute-Force Detection"
+version: 1.0
+description: >
+  Detects potential SamSam initial access via RDP brute-force. 
+  Triggers on a successful RDP login and correlates it with preceding 
+  failed logins from the same source IP within 5 minutes.
+
+# --- TRIGGER ---
+trigger:
+  # Wazuh rule for Windows Event ID 4624 (Successful Logon) where Logon Type is 10 (RDP)
+  event_type: "HOST_ALERT_WAZUH"
+  condition: "{{ trigger.data.ruleId == '18155' and trigger.data.logonType == '10' }}" # Example Wazuh rule ID for successful RDP logon
+
+# --- STEPS ---
+steps:
+  # STEP 1: Wait for evidence of preceding failed logins
+  - name: "Wait for Preceding Failed RDP Logins"
+    wait_for:
+      # Wazuh rule for Windows Event ID 4625 (Failed Logon)
+      event_type: "HOST_ALERT_WAZUH"
+      timeout: "5 minutes"
+      # This requires Wazuh rules to extract the source IP from failed logins
+      conditions:
+        # Condition 1: Must be a failed logon event
+        - "{{ new_event.data.ruleId == '18153' }}" # Example Wazuh rule ID for failed logon
+        # Condition 2: Must be from the *same* source IP as the successful login
+        - "{{ new_event.data.sourceIp == trigger.data.sourceIp }}"
+        # Condition 3: We expect multiple failures (Frequency condition depends on Workflow Engine capability)
+        # Assuming the engine stores context, we check if we've seen enough failures.
+        # This part might need adjustment based on engine features.
+        # Alternatively, a dedicated Wazuh rule could fire only after N failures.
+
+  # STEP 2: Initiate Quarantine if correlated
+  - name: "Initiate Host Quarantine (RDP Brute-Force)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          # Quarantine the internal host that was compromised
+          targetHost: "{{ trigger.data.destinationIp }}" # The IP of the machine logged into
+          action: "QUARANTINE"
+          justification: >
+            Quarantine issued. Correlated successful RDP login with 
+            preceding failed logins from IP {{ trigger.data.sourceIp }}. (Possible SamSam brute-force).
+  
+  # OPTIONAL STEP 3: Block External Attacker IP (if supported)
+  # - name: "Block External Attacker IP"
+  #   action:
+  #     type: "PUBLISH_EVENT"
+  #     event:
+  #       type: "INITIATE_MITIGATION" # Or a dedicated BLOCK_IP event type
+  #       data:
+  #         targetIp: "{{ trigger.data.sourceIp }}" # The external attacker IP
+  #         action: "BLOCK_IP"
+  #         justification: "Blocking external IP due to successful RDP brute-force leading to potential SamSam infection."

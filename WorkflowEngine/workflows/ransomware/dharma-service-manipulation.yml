@@ -1,0 +1,49 @@
+name: "Dharma Ransomware Service Manipulation Correlation"
+version: 1.0
+description: >
+  Dharma often disables security services and backup services before encryption.
+  This workflow correlates suspicious service stops/modifications with
+  subsequent file system changes to reduce false positives while maintaining
+  high detection accuracy.
+
+# --- TRIGGER ---
+trigger:
+  event_type: "HOST_ALERT_WAZUH"
+  
+  # Initial trigger: Detection of critical service manipulation
+  condition: >
+    {{ 'Security service stopped' in trigger.data.ruleDescription or
+       'VSS service disabled' in trigger.data.ruleDescription or
+       'Backup service terminated' in trigger.data.ruleDescription or
+       'Windows Defender disabled' in trigger.data.ruleDescription }}
+
+# --- STEPS ---
+steps:
+  # STEP 1: Wait for corroborating evidence of file encryption
+  - name: "Wait for File Encryption Activity"
+    wait_for:
+      event_type: "HOST_ALERT_WAZUH"
+      timeout: "5 minutes"
+      conditions:
+        # Condition 1: Must be from the same host
+        - "{{ new_event.data.sourceIp == trigger.data.sourceIp }}"
+        
+        # Condition 2: Must show file encryption behavior
+        - >
+          {{ 'High volume of file modifications' in new_event.data.ruleDescription or
+             'Suspicious file extension changes' in new_event.data.ruleDescription or
+             'Ransom note file created' in new_event.data.ruleDescription }}
+
+  # STEP 2: Execute mitigation only if correlation succeeds
+  - name: "Initiate Correlated Host Quarantine"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: >
+            Correlated detection: Service manipulation followed by file encryption activity.
+            High confidence Dharma ransomware infection.
+            Initial trigger: {{ trigger.data.ruleDescription }}

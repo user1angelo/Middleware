@@ -1,0 +1,27 @@
+name: "SamSam Lateral Movement (PsExec + BAT)"
+version: 1.0
+description: >
+  Detects SamSam lateral movement TTP: PsExec service launching a batch file. 
+  This specific pattern is highly indicative of malicious activity.
+
+# --- TRIGGER ---
+trigger:
+  event_type: "HOST_ALERT_WAZUH"
+  # Requires a specific Wazuh/Sysmon rule to detect this parent/child process relationship and command line args
+  condition: >
+    {{ trigger.data.parentProcessName == 'PSEXESVC.exe' and 
+       trigger.data.processName == 'cmd.exe' and 
+       '.bat' in trigger.data.commandLine }}
+
+# --- STEPS ---
+steps:
+  # Immediate quarantine - High confidence detection
+  - name: "Initiate Host Quarantine (PsExec BAT Launch)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}" # The host where the PSEXESVC ran
+          action: "QUARANTINE"
+          justification: "Automatic quarantine. Detected PsExec launching a batch file (SamSam TTP)."

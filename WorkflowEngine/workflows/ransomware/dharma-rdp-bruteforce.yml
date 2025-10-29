@@ -1,0 +1,32 @@
+name: "Dharma Ransomware RDP Brute Force Detection"
+version: 1.0
+description: >
+  Dharma ransomware typically gains initial access through RDP brute force attacks.
+  This workflow triggers on Suricata detection of RDP brute force attempts,
+  providing the earliest possible detection point before compromise.
+
+# --- TRIGGER ---
+trigger:
+  # Event from Suricata module detecting network intrusion
+  event_type: "NIDS_ALERT"
+  
+  # Condition checks for RDP brute force signatures
+  condition: >
+    {{ 'ET SCAN Potential RDP Brute' in trigger.data.signature or 
+       'RDP Brute Force' in trigger.data.signature or
+       'Multiple Failed RDP Authentication' in trigger.data.signature }}
+
+# --- STEPS ---
+steps:
+  - name: "Initiate Immediate Host Quarantine"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: >
+            Automatic quarantine due to high-confidence NIDS alert for 
+            RDP brute force attack (Dharma ransomware initial access vector).
+            Signature: {{ trigger.data.signature }}

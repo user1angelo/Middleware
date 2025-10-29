@@ -1,0 +1,40 @@
+name: "Petya/NotPetya Lateral Movement Correlation"
+version: 1.0
+description: >
+  Triggers on a suspicious host alert (PsExec/WMIC) and correlates 
+  it with a reboot task or network scan to confirm malicious intent.
+
+# --- TRIGGER ---
+trigger:
+  event_type: "HOST_ALERT_WAZUH"
+  # This rule would detect psexec.exe or wmic.exe execution
+  condition: "{{ trigger.data.ruleDescription == 'Suspicious Admin Tool Execution (PsExec/WMIC)' }}"
+
+# --- STEPS ---
+steps:
+  # STEP 1: Wait for a second, corroborating event
+  - name: "Wait for Corroborating Evidence"
+    wait_for:
+      # This is a special workflow that waits for *either* a network OR another host alert
+      # (This assumes the Workflow Engine can wait on multiple event_types)
+      # For simplicity, we'll wait for the *most likely* next step: a scheduled reboot.
+      event_type: "HOST_ALERT_WAZUH"
+      timeout: "3 minutes"
+      conditions:
+        # Condition 1: Must be the same host
+        - "{{ new_event.data.sourceIp == trigger.data.sourceIp }}"
+        # Condition 2: Must be Petya scheduling its reboot to load the MBR payload
+        - "{{ 'A task was created to reboot the system' in new_event.data.ruleDescription }}"
+
+  # STEP 2: This step only runs if the 'wait_for' succeeds
+  - name: "Initiate Correlated Host Quarantine"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: >
+            Quarantine issued. Correlated PsExec/WMIC execution with 
+            a suspicious scheduled reboot task.

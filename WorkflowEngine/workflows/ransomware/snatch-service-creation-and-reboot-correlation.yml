@@ -1,0 +1,49 @@
+name: "Snatch Ransomware Service Creation and Reboot Correlation"
+version: 1.0
+description: >
+  Snatch creates a malicious service to execute its payload after forcing a
+  Safe Mode reboot. This workflow correlates suspicious service creation with
+  scheduled reboot commands or Safe Mode registry changes, providing high-confidence
+  detection while minimizing false positives from legitimate admin activity.
+
+# --- TRIGGER ---
+trigger:
+  event_type: "HOST_ALERT_WAZUH"
+  
+  # Initial trigger: Detection of suspicious service creation
+  condition: >
+    {{ 'Suspicious service created with unusual path' in trigger.data.ruleDescription or
+       'Service created with non-standard binary location' in trigger.data.ruleDescription or
+       'New service installed: Potential ransomware persistence' in trigger.data.ruleDescription }}
+
+# --- STEPS ---
+steps:
+  # STEP 1: Wait for corroborating evidence
+  - name: "Wait for Reboot or Safe Mode Modification"
+    wait_for:
+      event_type: "HOST_ALERT_WAZUH"
+      timeout: "3 minutes"
+      conditions:
+        # Condition 1: Must be from the same host
+        - "{{ new_event.data.sourceIp == trigger.data.sourceIp }}"
+        
+        # Condition 2: Must show either reboot scheduling or Safe Mode changes
+        - >
+          {{ 'System reboot scheduled' in new_event.data.ruleDescription or
+             'Shutdown command executed' in new_event.data.ruleDescription or
+             'Safe Mode registry modification' in new_event.data.ruleDescription or
+             'Boot configuration modified' in new_event.data.ruleDescription }}
+
+  # STEP 2: Execute mitigation only if correlation succeeds
+  - name: "Initiate Correlated Host Quarantine"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          justification: >
+            Correlated detection: Suspicious service creation followed by reboot/Safe Mode modification.
+            High confidence Snatch ransomware infection pattern detected.
+            Initial service creation: {{ trigger.data.ruleDescription }}
