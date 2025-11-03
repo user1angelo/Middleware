@@ -1,0 +1,42 @@
+name: "SDN Detect Data Exfiltration Spike"
+version: 1.0
+description: >
+  Detects abnormal outbound volume indicative of data exfiltration and applies throttling and egress blocks.
+
+trigger:
+  event_type: "SDN_TELEMETRY_ALERT"
+  condition: "{{ trigger.payload.telemetry_type == 'egress_volume' and trigger.payload.total_bytes_out_5m >= 1048576000 }}"
+
+steps:
+  - name: "Apply 1 Mbps egress cap"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "RATE_LIMIT"
+          sdn_controller: "opendaylight"
+          direction: "egress"
+          limit_mbps: 1
+          burst_kb: 128
+          duration: "60 minutes"
+          priority: "high"
+          justification: "Outbound data >= 1GB/5m. Applying throttle."
+
+  - name: "Block HTTP/HTTPS egress"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_PORTS"
+          sdn_controller: "opendaylight"
+          direction: "egress"
+          tcp_ports: [80, 443]
+          duration: "60 minutes"
+          priority: "medium"
+          justification: "Reduce common exfil channels during spike."

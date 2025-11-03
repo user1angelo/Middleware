@@ -1,0 +1,45 @@
+name: "SDN Detect SMB Surge (Potential Encryption)"
+version: 1.0
+description: >
+  Detects abnormal SMB write volume from a host, indicative of mass file encryption.
+  Triggers targeted SMB blocking and traffic mirroring for IR.
+
+trigger:
+  event_type: "SDN_TELEMETRY_ALERT"
+  condition: "{{ trigger.payload.telemetry_type == 'smb_activity' and trigger.payload.smb_bytes_1m >= 104857600 }}"
+
+steps:
+  - name: "Block SMB to/from infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_SERVICES"
+          sdn_controller: "opendaylight"
+          services:
+            - name: "smb"
+              protocol: "tcp"
+              ports: [445]
+          direction: "both"
+          duration: "120 minutes"
+          priority: "high"
+          justification: "SMB bytes/min >= 100MB (possible encryption burst)."
+
+  - name: "Mirror traffic for investigation"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "MIRROR_TRAFFIC"
+          sdn_controller: "opendaylight"
+          span_target: "sensor-mirror-1"
+          direction: "both"
+          duration: "90 minutes"
+          priority: "low"
+          justification: "Mirror SMB-heavy traffic for IR."

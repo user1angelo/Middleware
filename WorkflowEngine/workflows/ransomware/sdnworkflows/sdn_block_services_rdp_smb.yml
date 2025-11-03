@@ -1,0 +1,32 @@
+name: "SDN Block Lateral Movement Services (RDP/SMB)"
+version: 1.0
+description: >
+  Block key lateral movement services (RDP TCP/3389 and SMB TCP/445) to/from the infected host.
+  Reduces spread while preserving other necessary traffic.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Block RDP and SMB in both directions for infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_SERVICES"
+          sdn_controller: "opendaylight"
+          services:
+            - name: "rdp"
+              protocol: "tcp"
+              ports: [3389]
+            - name: "smb"
+              protocol: "tcp"
+              ports: [445]
+          direction: "both"
+          duration: "120 minutes"
+          priority: "high"
+          justification: "Ransomware suspected. Blocking RDP/SMB lateral movement for {{ trigger.payload.host_id }}."

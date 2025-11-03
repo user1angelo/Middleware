@@ -1,0 +1,44 @@
+name: "SDN Detect Lateral Scan (East-West Fanout)"
+version: 1.0
+description: >
+  Detects abnormal internal fanout suggesting lateral movement/scanning behavior.
+
+trigger:
+  event_type: "SDN_TELEMETRY_ALERT"
+  condition: "{{ trigger.payload.telemetry_type == 'east_west_fanout' and trigger.payload.dest_count_5m >= 20 }}"
+
+steps:
+  - name: "Block east-west traffic, allow management only"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_LATERAL"
+          sdn_controller: "opendaylight"
+          allowlist_cidrs:
+            - "192.168.100.0/24"
+            - "192.168.200.0/24"
+            - "192.168.210.0/24"
+          duration: "until_cleared"
+          priority: "high"
+          justification: "East-west fanout >= 20 destinations in 5m."
+
+  - name: "Rate-limit egress while investigating"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "RATE_LIMIT"
+          sdn_controller: "opendaylight"
+          direction: "egress"
+          limit_mbps: 1
+          burst_kb: 128
+          duration: "30 minutes"
+          priority: "medium"
+          justification: "Throttling host during suspected lateral scan."

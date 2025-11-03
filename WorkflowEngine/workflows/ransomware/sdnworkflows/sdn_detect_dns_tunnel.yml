@@ -1,0 +1,44 @@
+name: "SDN Detect DNS Tunneling / High Fail Ratio"
+version: 1.0
+description: >
+  Detects signs of DNS tunneling or C2 via high NXDOMAIN rate or long TXT/NULL queries.
+
+trigger:
+  event_type: "SDN_TELEMETRY_ALERT"
+  condition: "{{ trigger.payload.telemetry_type == 'dns_activity' and (trigger.payload.dns_fail_pct >= 50 or trigger.payload.avg_query_len >= 100) }}"
+
+steps:
+  - name: "Restrict DNS to internal resolvers"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "RESTRICT_DNS"
+          sdn_controller: "opendaylight"
+          allowed_dns_servers:
+            - "192.168.50.53"
+            - "192.168.50.54"
+          duration: "90 minutes"
+          priority: "medium"
+          justification: "DNS fail% >= 50 or avg query len >= 100."
+
+  - name: "Block Internet egress except RFC1918"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_EGRESS_INTERNET"
+          sdn_controller: "opendaylight"
+          allowlist_cidrs:
+            - "10.0.0.0/8"
+            - "172.16.0.0/12"
+            - "192.168.0.0/16"
+          duration: "120 minutes"
+          priority: "high"
+          justification: "Contain suspected DNS tunneling/C2."

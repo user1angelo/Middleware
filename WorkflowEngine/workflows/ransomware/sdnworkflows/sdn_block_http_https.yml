@@ -1,0 +1,25 @@
+name: "SDN Block HTTP/HTTPS Egress for Infected Host"
+version: 1.0
+description: >
+  Block outbound HTTP/HTTPS from the infected host to reduce exfiltration and C2 over web protocols.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Block HTTP/HTTPS egress from infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_PORTS"
+          sdn_controller: "opendaylight"
+          direction: "egress"
+          tcp_ports: [80, 443]
+          duration: "60 minutes"
+          priority: "medium"
+          justification: "Ransomware suspected. Blocking web egress (80/443) for host to reduce C2 and exfil."

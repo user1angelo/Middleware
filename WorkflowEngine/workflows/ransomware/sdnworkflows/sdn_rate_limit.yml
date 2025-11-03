@@ -1,0 +1,27 @@
+name: "SDN Egress Rate-Limit for Infected Host"
+version: 1.0
+description: >
+  Apply strict egress rate-limiting to the infected host to slow potential exfiltration
+  while keeping limited connectivity for investigation.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Apply egress policer to infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "RATE_LIMIT"
+          sdn_controller: "opendaylight"
+          direction: "egress"
+          limit_mbps: 1
+          burst_kb: 128
+          duration: "30 minutes"
+          priority: "medium"
+          justification: "Ransomware suspected. Applying 1 Mbps egress cap for containment and observation."

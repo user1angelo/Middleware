@@ -1,0 +1,26 @@
+name: "SDN Shut Access Port (Emergency Kill Switch)"
+version: 1.0
+description: >
+  Disable the switch port where the infected host is connected. Use as a last resort.
+  Requires switch and port identification to be available or resolved by SDN module.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Disable access port for infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          switch_id: "{{ trigger.payload.switch_id }}"
+          port_id: "{{ trigger.payload.port_id }}"
+          action: "SHUT_PORT"
+          sdn_controller: "opendaylight"
+          duration: "until_cleared"
+          priority: "critical"
+          justification: "Ransomware detected. Disabling access port to stop all traffic at Layer2."

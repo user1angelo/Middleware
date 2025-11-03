@@ -1,0 +1,27 @@
+name: "SDN Restrict DNS to Internal Resolvers"
+version: 1.0
+description: >
+  Force the infected host to use only approved internal DNS servers to block DNS-based C2
+  and domain generation algorithm lookups.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Allow only internal DNS for infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "RESTRICT_DNS"
+          sdn_controller: "opendaylight"
+          allowed_dns_servers:
+            - "192.168.50.53"
+            - "192.168.50.54"
+          duration: "90 minutes"
+          priority: "medium"
+          justification: "Ransomware suspected. Restricting DNS to internal resolvers only."

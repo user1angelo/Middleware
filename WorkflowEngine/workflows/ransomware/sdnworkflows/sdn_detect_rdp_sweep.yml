@@ -1,0 +1,43 @@
+name: "SDN Detect RDP Sweep / Brute-force"
+version: 1.0
+description: >
+  Detects high-rate RDP connection attempts that may indicate brute-force or lateral RDP spread.
+
+trigger:
+  event_type: "SDN_TELEMETRY_ALERT"
+  condition: "{{ trigger.payload.telemetry_type == 'rdp_activity' and trigger.payload.rdp_conn_rate_1m >= 30 }}"
+
+steps:
+  - name: "Block RDP in both directions"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_SERVICES"
+          sdn_controller: "opendaylight"
+          services:
+            - name: "rdp"
+              protocol: "tcp"
+              ports: [3389]
+          direction: "both"
+          duration: "120 minutes"
+          priority: "high"
+          justification: "RDP connection rate >= 30/min (possible brute-force)."
+
+  - name: "Optional: Move to quarantine VLAN"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "ISOLATE_VLAN"
+          sdn_controller: "opendaylight"
+          quarantine_vlan: 999
+          duration: "until_cleared"
+          priority: "high"
+          justification: "Contain suspected RDP brute-force propagation."
