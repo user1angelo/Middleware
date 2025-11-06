@@ -16,10 +16,10 @@ import java.util.UUID;
  */
 public class TCSTester {
     
-    private static final String RABBITMQ_HOST = "192.168.86.76";
+    private static final String RABBITMQ_HOST = "192.168.1.8";
     private static final int RABBITMQ_PORT = 5672;
-    private static final String RABBITMQ_USER = "guest";
-    private static final String RABBITMQ_PASSWORD = "guest";
+    private static final String RABBITMQ_USER = "user";
+    private static final String RABBITMQ_PASSWORD = "password";
     private static final String ALERTS_QUEUE = "alerts_queue";
     private static final String WORKFLOW_QUEUE = "workflow_queue";
     

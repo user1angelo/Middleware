@@ -1,0 +1,36 @@
+import axios from 'axios';
+
+const API_BASE = 'http://localhost:3001/api';
+
+const api = axios.create({
+  baseURL: API_BASE,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+export const processAPI = {
+  getStatus: () => api.get('/processes/status'),
+  start: (name) => api.post(`/processes/${name}/start`),
+  stop: (name) => api.post(`/processes/${name}/stop`),
+  runTest: () => api.post('/processes/test')
+};
+
+export const configAPI = {
+  get: (program) => api.get(`/config/${program}`),
+  update: (program, content) => api.put(`/config/${program}`, { content })
+};
+
+export const workflowAPI = {
+  list: () => api.get('/workflows'),
+  get: (category, name) => api.get(`/workflows/${category}/${name}`),
+  create: (category, name, content) => api.post(`/workflows/${category}`, { name, content }),
+  update: (category, name, content) => api.put(`/workflows/${category}/${name}`, { content }),
+  delete: (category, name) => api.delete(`/workflows/${category}/${name}`)
+};
+
+export const moduleAPI = {
+  getHealth: () => api.get('/modules/health')
+};
+
+export default api;
