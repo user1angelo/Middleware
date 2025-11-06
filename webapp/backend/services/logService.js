@@ -123,10 +123,10 @@ function broadcastLog(processKey, message) {
       message: message,
       timestamp: new Date().toISOString()
     };
-    console.log(`Broadcasting log for ${processKey}:`, message.substring(0, 100));
+    console.log(`✉️  Broadcasting log for '${processKey}' (${message.length} bytes) to ${io.engine.clientsCount} client(s)`);
     io.emit('process-log', logData);
   } else {
-    console.error('Socket.IO not initialized!');
+    console.error('❌ Socket.IO not initialized - cannot broadcast logs!');
   }
 }
 

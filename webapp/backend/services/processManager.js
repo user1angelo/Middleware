@@ -113,11 +113,12 @@ async function startProcess(processKey) {
       logStream.write(output);
       
       // Stream to WebSocket
-      console.log(`[${processKey}] stdout: ${output.substring(0, 50).replace(/\n/g, '\\n')}...`);
+      console.log(`[${processKey}] stdout (${output.length} bytes):`, output.substring(0, 100).replace(/\n/g, ' '));
       if (logService) {
+        console.log(`[${processKey}] Broadcasting to WebSocket...`);
         logService.broadcastLog(processKey, output);
       } else {
-        console.error(`[${processKey}] logService is NULL!`);
+        console.error(`[${processKey}] ERROR: logService is NULL - cannot broadcast logs!`);
       }
     });
     
@@ -130,11 +131,12 @@ async function startProcess(processKey) {
       logStream.write(output);
       
       // Stream to WebSocket
-      console.log(`[${processKey}] stderr: ${output.substring(0, 50).replace(/\n/g, '\\n')}...`);
+      console.log(`[${processKey}] stderr (${output.length} bytes):`, output.substring(0, 100).replace(/\n/g, ' '));
       if (logService) {
+        console.log(`[${processKey}] Broadcasting stderr to WebSocket...`);
         logService.broadcastLog(processKey, output);
       } else {
-        console.error(`[${processKey}] logService is NULL!`);
+        console.error(`[${processKey}] ERROR: logService is NULL - cannot broadcast logs!`);
       }
     });
     

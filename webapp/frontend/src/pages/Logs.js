@@ -31,7 +31,7 @@ const Logs = () => {
       console.log('Received process-log:', data);
       setLogs(prev => ({
         ...prev,
-        [data.process]: [...prev[data.process], { timestamp: data.timestamp, message: data.message }].slice(-1000)
+        [data.process]: [...(prev[data.process] || []), { timestamp: data.timestamp, message: data.message }].slice(-1000)
       }));
     });
     
@@ -40,16 +40,16 @@ const Logs = () => {
       const formatted = `[${data.queue}] ${JSON.stringify(data.message, null, 2)}`;
       setLogs(prev => ({
         ...prev,
-        rabbitmq: [...prev.rabbitmq, { timestamp: data.timestamp, message: formatted }].slice(-1000)
+        rabbitmq: [...(prev.rabbitmq || []), { timestamp: data.timestamp, message: formatted }].slice(-1000)
       }));
     });
-
+    
     // Non-intrusive RabbitMQ stats
     socket.current.on('rabbitmq-stats', (data) => {
       const formatted = `[${data.queue}] total=${data.messages} ready=${data.messages_ready} unacked=${data.messages_unacknowledged} rate.in=${data.incoming_rate.toFixed?.(2) || data.incoming_rate}/s rate.out=${data.deliver_get_rate.toFixed?.(2) || data.deliver_get_rate}/s`;
       setLogs(prev => ({
         ...prev,
-        rabbitmq: [...prev.rabbitmq, { timestamp: data.timestamp, message: formatted }].slice(-1000)
+        rabbitmq: [...(prev.rabbitmq || []), { timestamp: data.timestamp, message: formatted }].slice(-1000)
       }));
     });
     
@@ -94,14 +94,14 @@ const Logs = () => {
         </div>
         
         <div className="log-viewer">
-          {logs[activeTab].map((log, i) => (
+          {(logs[activeTab] || []).map((log, i) => (
             <div key={i} className="log-line">
               <span style={{color: 'var(--text-muted)'}}>{new Date(log.timestamp).toLocaleTimeString()}</span>
               {' '}
               {log.message}
             </div>
           ))}
-          {logs[activeTab].length === 0 && (
+          {(!logs[activeTab] || logs[activeTab].length === 0) && (
             <div style={{color: 'var(--text-secondary)'}}>No logs yet...</div>
           )}
           <div ref={logEndRef} />
