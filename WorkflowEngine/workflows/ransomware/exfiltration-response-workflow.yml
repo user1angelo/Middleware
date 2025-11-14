@@ -1,0 +1,39 @@
+name: "Data Exfiltration Detection via Traffic Volume"
+description: >
+  SDN monitors flow statistics, triggers SPAN mirroring when unusual
+  upload volumes detected (potential data exfiltration before encryption).
+
+trigger:
+  event_type: "SDN_FLOW_ANOMALY"
+  condition: "{{ trigger.data.uploadBytes > 1000000000 and trigger.data.timeWindow < 300 }}"
+
+steps:
+  - name: "Enable Targeted SPAN Mirroring"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_CONFIGURE_SPAN"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          mirrorDirection: "EGRESS_ONLY"  # Only outbound traffic
+          destinationPort: "SURICATA_INTERFACE"
+          filterProtocol: ["TCP/443", "TCP/80"]  # Focus on HTTPS/HTTP
+  
+  - name: "Analyze Exfiltration Patterns"
+    wait_for:
+      event_type: "NIDS_ALERT"
+      timeout: "3 minutes"
+      conditions:
+        - "{{ new_event.data.sourceIp == trigger.data.sourceIp }}"
+        - "{{ new_event.data.category == 'data_exfiltration' }}"
+  
+  - name: "Apply Rate Limiting via Flow Rules"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_APPLY_QOS"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "RATE_LIMIT"
+          maxBandwidth: "100kbps"
+          protocol: "ALL"

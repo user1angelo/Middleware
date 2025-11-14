@@ -1,0 +1,28 @@
+name: "SDN Block Internet Egress for Infected Host"
+version: 1.0
+description: >
+  Prevent any outbound connections from the infected host to non-RFC1918 addresses.
+  Reduces risk of C2 and data exfiltration during incident containment.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Block Internet-bound traffic from infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_EGRESS_INTERNET"
+          sdn_controller: "opendaylight"
+          allowlist_cidrs:
+            - "10.0.0.0/8"
+            - "172.16.0.0/12"
+            - "192.168.0.0/16"
+          duration: "120 minutes"
+          priority: "high"
+          justification: "Ransomware suspected. Blocking Internet egress except RFC1918 destinations."

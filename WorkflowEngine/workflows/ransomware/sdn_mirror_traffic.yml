@@ -1,0 +1,26 @@
+name: "SDN Mirror Infected Host Traffic to Sensor"
+version: 1.0
+description: >
+  Configure port mirroring/SPAN for the infected host towards a monitoring sensor
+  for deep packet inspection during incident response.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Enable SPAN session for infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "MIRROR_TRAFFIC"
+          sdn_controller: "opendaylight"
+          span_target: "sensor-mirror-1"
+          direction: "both"
+          duration: "90 minutes"
+          priority: "low"
+          justification: "Ransomware suspected. Mirroring host traffic to IDS sensor for analysis."

@@ -1,0 +1,93 @@
+name: "Precise SDN Flow-Based Host Isolation"
+version: 2.0
+description: >
+  Uses OpenDaylight to install drop-all flow rules for a compromised host,
+  effectively quarantining it at the network switch level.
+
+trigger:
+  event_type: "RANSOMWARE_CONFIRMED"
+  condition: "{{ trigger.data.confidence > 0.9 }}"
+
+steps:
+  - name: "Query SDN Topology for Host Location"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_TOPOLOGY_QUERY"
+        data:
+          queryType: "HOST_LOCATION"
+          targetIp: "{{ trigger.data.sourceIp }}"
+          targetMac: "{{ trigger.data.macAddress }}"
+  
+  - name: "Wait for Topology Information"
+    wait_for:
+      event_type: "SDN_TOPOLOGY_RESULT"
+      timeout: "10 seconds"
+      conditions:
+        - "{{ new_event.data.targetIp == trigger.data.sourceIp }}"
+  
+  - name: "Install High-Priority Drop Flow Rules"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_INSTALL_FLOW"
+        data:
+          # OpenFlow-specific parameters
+          switchId: "{{ new_event.data.switchId }}"
+          tableId: 0
+          priority: 32768  # Very high priority
+          flowId: "quarantine-{{ trigger.data.sourceIp }}"
+          
+          # Match conditions
+          match:
+            ipv4_src: "{{ trigger.data.sourceIp }}"
+            eth_type: 0x0800  # IPv4
+          
+          # Action: Drop all traffic
+          instructions:
+            - type: "APPLY_ACTIONS"
+              actions:
+                - type: "DROP"
+          
+          # Flow properties
+          hardTimeout: 0  # Permanent until manually removed
+          idleTimeout: 0
+  
+  - name: "Install Reverse Direction Drop Rule"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_INSTALL_FLOW"
+        data:
+          switchId: "{{ new_event.data.switchId }}"
+          tableId: 0
+          priority: 32768
+          flowId: "quarantine-reverse-{{ trigger.data.sourceIp }}"
+          
+          match:
+            ipv4_dst: "{{ trigger.data.sourceIp }}"
+            eth_type: 0x0800
+          
+          instructions:
+            - type: "APPLY_ACTIONS"
+              actions:
+                - type: "DROP"
+  
+  - name: "Verify Quarantine Installation"
+    wait_for:
+      event_type: "SDN_FLOW_INSTALLED"
+      timeout: "15 seconds"
+      conditions:
+        - "{{ new_event.data.flowId contains 'quarantine' }}"
+        - "{{ new_event.data.status == 'ACTIVE' }}"
+  
+  - name: "Log Quarantine to Audit Trail"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "AUDIT_LOG"
+        data:
+          action: "HOST_QUARANTINED_SDN"
+          targetHost: "{{ trigger.data.sourceIp }}"
+          switchId: "{{ new_event.data.switchId }}"
+          flowRules: ["quarantine-{{ trigger.data.sourceIp }}", "quarantine-reverse-{{ trigger.data.sourceIp }}"]

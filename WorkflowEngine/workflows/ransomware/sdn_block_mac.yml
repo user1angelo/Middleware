@@ -1,0 +1,25 @@
+name: "SDN Block Host MAC (L2 Port-Level)"
+version: 1.0
+description: >
+  Drop traffic for the infected host based on MAC address at the access layer.
+  Effective against IP changes; requires MAC known or discoverable by SDN.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Block infected host MAC on access switches"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          targetMac: "{{ trigger.payload.mac_address }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_MAC"
+          sdn_controller: "opendaylight"
+          duration: "60 minutes"
+          priority: "high"
+          justification: "Ransomware detected. Blocking MAC {{ trigger.payload.mac_address }} across access layer."

@@ -1,0 +1,70 @@
+name: "Progressive Network Traffic Analysis via SPAN"
+version: 1.2
+description: >
+  Uses SDN controller to dynamically configure SPAN port mirroring when
+  a host shows suspicious behavior, sending traffic to Suricata for DPI.
+
+trigger:
+  event_type: "HOST_ALERT"
+  condition: "{{ trigger.data.severity >= 6 and trigger.data.suspiciousProcess == true }}"
+
+steps:
+  - name: "Configure SPAN Port Mirroring via OpenDaylight"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_CONFIGURE_SPAN"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          mirrorDuration: "5 minutes"
+          destinationPort: "SURICATA_INTERFACE"
+          bidirectional: true
+          # SDN-specific parameters
+          switchId: "openflow:1"
+          sourcePort: "{{ trigger.data.switchPort }}"
+          samplingRate: 1.0  # Mirror 100% of traffic initially
+  
+  - name: "Wait for SPAN Configuration Confirmation"
+    wait_for:
+      event_type: "SDN_SPAN_CONFIGURED"
+      timeout: "30 seconds"
+      conditions:
+        - "{{ new_event.data.targetHost == trigger.data.sourceIp }}"
+        - "{{ new_event.data.configStatus == 'SUCCESS' }}"
+  
+  - name: "Enable Suricata Analysis on Mirrored Traffic"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "NIDS_ENABLE_ANALYSIS"
+        data:
+          interface: "SURICATA_INTERFACE"
+          targetIp: "{{ trigger.data.sourceIp }}"
+          rulesets: ["RANSOMWARE_SIGNATURES", "EMERGING_THREATS"]
+  
+  - name: "Wait for Deep Packet Inspection Results"
+    wait_for:
+      event_type: "NIDS_ALERT"
+      timeout: "5 minutes"
+      conditions:
+        - "{{ new_event.data.sourceIp == trigger.data.sourceIp }}"
+        - "{{ new_event.data.signatureSeverity >= '2' }}"
+  
+  - name: "Remove SPAN Configuration"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_REMOVE_SPAN"
+        data:
+          switchId: "openflow:1"
+          configId: "{{ new_event.data.spanConfigId }}"
+  
+  - name: "Initiate Flow-Based Quarantine"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.data.sourceIp }}"
+          action: "QUARANTINE"
+          method: "FLOW_RULE"

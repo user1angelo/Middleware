@@ -1,0 +1,25 @@
+name: "SDN Block Host IP (L3 Fabric-wide)"
+version: 1.0
+description: >
+  Install drop flows for the infected host's IP across the fabric (both ingress and egress).
+  Useful when VLAN isolation is not available or insufficient.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Block infected host IP in both directions"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_IP"
+          sdn_controller: "opendaylight"
+          direction: "both"
+          duration: "60 minutes"
+          priority: "high"
+          justification: "Ransomware detected. Installing fabric-wide drop for {{ trigger.payload.source_ip }}."

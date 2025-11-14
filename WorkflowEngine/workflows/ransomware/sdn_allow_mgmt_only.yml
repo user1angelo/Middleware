@@ -1,0 +1,28 @@
+name: "SDN Allow Only Management Destinations"
+version: 1.0
+description: >
+  Restrict the infected host so that it can reach only approved management subnets
+  (EDR, IR jump hosts, patch servers) and nothing else.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Restrict host to management allowlist only"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "ALLOWLIST_ONLY"
+          sdn_controller: "opendaylight"
+          allowed_destinations:
+            - cidr: "192.168.100.0/24"  # EDR/IR
+            - cidr: "192.168.200.0/24"  # Patch/WSUS
+            - cidr: "192.168.210.0/24"  # Jump hosts
+          duration: "until_cleared"
+          priority: "high"
+          justification: "Ransomware suspected. Allowing only management subnets for remediation access."

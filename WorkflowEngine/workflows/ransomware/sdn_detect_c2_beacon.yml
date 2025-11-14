@@ -1,0 +1,44 @@
+name: "SDN Detect C2 Beaconing / IOC Match"
+version: 1.0
+description: >
+  Detects likely C2 behavior via beacon score or IOC match, then restricts Internet egress and DNS.
+
+trigger:
+  event_type: "SDN_TELEMETRY_ALERT"
+  condition: "{{ trigger.payload.telemetry_type == 'c2_activity' and (trigger.payload.c2_ioc_match == true or trigger.payload.beacon_score >= 0.9) }}"
+
+steps:
+  - name: "Block Internet egress from infected host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "BLOCK_EGRESS_INTERNET"
+          sdn_controller: "opendaylight"
+          allowlist_cidrs:
+            - "10.0.0.0/8"
+            - "172.16.0.0/12"
+            - "192.168.0.0/16"
+          duration: "120 minutes"
+          priority: "high"
+          justification: "C2 IOC match or beacon_score >= 0.9 detected."
+
+  - name: "Restrict DNS to internal resolvers"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "RESTRICT_DNS"
+          sdn_controller: "opendaylight"
+          allowed_dns_servers:
+            - "192.168.50.53"
+            - "192.168.50.54"
+          duration: "90 minutes"
+          priority: "medium"
+          justification: "Limit DNS paths often used by C2 and DGA."

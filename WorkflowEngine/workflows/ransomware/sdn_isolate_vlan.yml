@@ -1,0 +1,25 @@
+name: "SDN Quarantine via Isolation VLAN"
+version: 1.0
+description: >
+  Upon ransomware detection, move the host into a quarantine VLAN using OpenDaylight.
+  This limits east-west and north-south communication while keeping remote access for IR.
+
+trigger:
+  event_type: "alerts.host.wazuh"
+  condition: "{{ trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Quarantine host by moving to isolation VLAN"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          hostId: "{{ trigger.payload.host_id }}"
+          action: "ISOLATE_VLAN"
+          sdn_controller: "opendaylight"
+          quarantine_vlan: 999
+          priority: "high"
+          duration: "until_cleared"
+          justification: "Ransomware activity detected. Moving host to VLAN 999 for containment."

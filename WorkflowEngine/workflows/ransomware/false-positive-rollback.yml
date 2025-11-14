@@ -1,0 +1,51 @@
+name: "False Positive SDN Configuration Rollback"
+description: >
+  Automatically removes SDN quarantine rules if incident
+  is determined to be false positive.
+
+trigger:
+  event_type: "INCIDENT_RESOLVED"
+  condition: "{{ trigger.data.resolution == 'FALSE_POSITIVE' }}"
+
+steps:
+  - name: "Query Active Mitigation Rules"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_QUERY_ACTIVE_FLOWS"
+        data:
+          targetHost: "{{ trigger.data.hostIp }}"
+          filterByMetadata:
+            incidentId: "{{ trigger.data.incidentId }}"
+  
+  - name: "Wait for Flow List"
+    wait_for:
+      event_type: "SDN_FLOW_LIST_RESULT"
+      timeout: "15 seconds"
+  
+  - name: "Remove Quarantine Flow Rules"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_DELETE_FLOWS"
+        data:
+          flowIds: "{{ new_event.data.flowIds }}"
+          switchIds: "{{ new_event.data.switchIds }}"
+  
+  - name: "Restore Original VLAN Configuration"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SDN_RESTORE_CONFIGURATION"
+        data:
+          targetHost: "{{ trigger.data.hostIp }}"
+          restoreFromBackup: true
+          backupTimestamp: "{{ trigger.data.quarantineTimestamp }}"
+  
+  - name: "Verify Network Connectivity"
+    wait_for:
+      event_type: "SDN_CONNECTIVITY_TEST"
+      timeout: "30 seconds"
+      conditions:
+        - "{{ new_event.data.targetHost == trigger.data.hostIp }}"
+        - "{{ new_event.data.connectivityStatus == 'NORMAL' }}"
