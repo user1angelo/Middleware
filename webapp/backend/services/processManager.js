@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
@@ -8,7 +8,7 @@ const PROCESSES = {
     name: 'ThreatContextStore',
     cwd: process.env.THREAT_CONTEXT_STORE_PATH,
     command: 'java',
-    args: ['-Djava.awt.headless=true', '-cp', 'out:lib/*', 'com.yourorg.middleware.ThreatContextStoreMain'],
+    args: ['-cp', 'out:lib/*', 'com.yourorg.middleware.ThreatContextStoreMain'],
     process: null,
     status: 'stopped',
     logFile: null
@@ -17,7 +17,7 @@ const PROCESSES = {
     name: 'ModuleRegistry',
     cwd: process.env.MODULE_REGISTRY_PATH,
     command: 'java',
-    args: ['-Djava.awt.headless=true', '-cp', 'out:lib/*', 'com.yourorg.registry.ModuleRegistryMain'],
+    args: ['-cp', 'out:lib/*', 'com.yourorg.registry.ModuleRegistryMain'],
     process: null,
     status: 'stopped',
     logFile: null
@@ -26,7 +26,7 @@ const PROCESSES = {
     name: 'WorkflowEngine',
     cwd: process.env.WORKFLOW_ENGINE_PATH,
     command: 'java',
-    args: ['-Djava.awt.headless=true', '-cp', 'out:lib/*', 'com.yourorg.workflow.WorkflowEngineMain'],
+    args: ['-cp', 'out:lib/*', 'com.yourorg.workflow.WorkflowEngineMain'],
     process: null,
     status: 'stopped',
     logFile: null
@@ -49,6 +49,84 @@ async function ensureLogsDir() {
     console.error('Failed to create logs directory:', error);
   }
   return logsDir;
+}
+
+// Helper: find an installed terminal emulator
+function findTerminal() {
+  const candidates = [
+    {
+      cmd: 'gnome-terminal',
+      buildArgs: (title, cwd, shellCmd) => ['--title', title, '--', 'bash', '-lc', shellCmd]
+    },
+    {
+      cmd: 'konsole',
+      buildArgs: (title, cwd, shellCmd) => ['--workdir', cwd, '--hold', '--title', title, '-e', 'bash', '-lc', shellCmd]
+    },
+    {
+      cmd: 'xfce4-terminal',
+      buildArgs: (title, cwd, shellCmd) => ['--hold', '--title', title, '--working-directory', cwd, '-e', `bash -lc "${shellCmd.replace(/"/g, '\\\"')}"`]
+    },
+    {
+      cmd: 'alacritty',
+      buildArgs: (title, cwd, shellCmd) => ['-t', title, '-e', 'bash', '-lc', shellCmd]
+    },
+    {
+      cmd: 'kitty',
+      buildArgs: (title, cwd, shellCmd) => ['@', 'launch', '--title', title, 'bash', '-lc', shellCmd]
+    },
+    {
+      cmd: 'xterm',
+      buildArgs: (title, cwd, shellCmd) => ['-T', title, '-hold', '-e', 'bash', '-lc', shellCmd]
+    }
+  ];
+
+  for (const c of candidates) {
+    try {
+      const res = spawnSync('which', [c.cmd], { stdio: 'ignore' });
+      if (res.status === 0) return c;
+    } catch (_) { /* ignore */ }
+  }
+  return null;
+}
+
+function shellEscapeArg(arg) {
+  if (arg === undefined || arg === null) return '';
+  return `'${String(arg).replace(/'/g, "'\\''")}'`;
+}
+
+function buildTailCommand(cwd, logPath) {
+  const cd = `cd ${shellEscapeArg(cwd)}`;
+  const tail = `tail -n +1 -f ${shellEscapeArg(logPath)}`;
+  // Keep the window open after exit
+  const pause = 'echo; read -n1 -s -r -p "Press any key to close"';
+  return `${cd} && ${tail}; ${pause}`;
+}
+
+function openTerminalForLog(title, cwd, logPath) {
+  // Allow disabling via env if needed
+  if ((process.env.DISABLE_TERMINAL_OPEN || 'false').toLowerCase() === 'true') return;
+
+  const term = findTerminal();
+  if (!term) {
+    console.warn('No supported terminal emulator found. Skipping opening terminal window.');
+    return;
+  }
+
+  const cmd = buildTailCommand(cwd, logPath);
+  const args = term.buildArgs(title, cwd, cmd);
+
+  try {
+    const child = spawn(term.cmd, args, {
+      cwd,
+      env: process.env,
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+    console.log(`Opened terminal '${term.cmd}' to tail logs for ${title}`);
+  } catch (e) {
+    console.warn(`Failed to open terminal '${term.cmd}':`, e.message);
+  }
 }
 
 // Start a process
@@ -103,6 +181,9 @@ async function startProcess(processKey) {
     proc.status = 'running';
     
     console.log(`Started ${proc.name} with PID ${childProcess.pid}`);
+
+    // Open a terminal window to live-tail the log
+    openTerminalForLog(proc.name, proc.cwd, logFilePath);
     
     // Handle stdout
     childProcess.stdout.setEncoding('utf8');

@@ -277,6 +277,7 @@ body {
 .log-line {
   margin-bottom: 4px;
   word-wrap: break-word;
+  white-space: pre-wrap; /* preserve newlines and spacing in log messages */
 }
 
 .table {
