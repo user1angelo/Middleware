@@ -61,6 +61,12 @@ MODULE_REGISTRY_PATH=/home/you/Documents/GitHub/Middleware/ModuleRegistry
 WORKFLOW_ENGINE_PATH=/home/you/Documents/GitHub/Middleware/WorkflowEngine
 TCS_TESTER_PATH=/home/you/Documents/GitHub/Middleware/TCSTester
 
+# Optional: OpenDaylight SDN controller (managed from Control Panel)
+# If you don't use OpenDaylight, you can omit these.
+OPENDAYLIGHT_PATH=/opt/opendaylight
+OPENDAYLIGHT_COMMAND=/opt/opendaylight/bin/start
+OPENDAYLIGHT_ARGS=
+
 # PostgreSQL (used by moduleHealthService)
 DB_HOST=localhost
 DB_PORT=5432

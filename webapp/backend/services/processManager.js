@@ -11,7 +11,8 @@ const PROCESSES = {
     args: ['-cp', 'out:lib/*', 'com.yourorg.middleware.ThreatContextStoreMain'],
     process: null,
     status: 'stopped',
-    logFile: null
+    logFile: null,
+    requiresJavaLayout: true
   },
   moduleRegistry: {
     name: 'ModuleRegistry',
@@ -20,7 +21,8 @@ const PROCESSES = {
     args: ['-cp', 'out:lib/*', 'com.yourorg.registry.ModuleRegistryMain'],
     process: null,
     status: 'stopped',
-    logFile: null
+    logFile: null,
+    requiresJavaLayout: true
   },
   workflowEngine: {
     name: 'WorkflowEngine',
@@ -29,7 +31,19 @@ const PROCESSES = {
     args: ['-cp', 'out:lib/*', 'com.yourorg.workflow.WorkflowEngineMain'],
     process: null,
     status: 'stopped',
-    logFile: null
+    logFile: null,
+    requiresJavaLayout: true
+  },
+  opendaylight: {
+    name: 'OpenDaylight',
+    cwd: process.env.OPENDAYLIGHT_PATH,
+    command: process.env.OPENDAYLIGHT_COMMAND,
+    args: process.env.OPENDAYLIGHT_ARGS ? process.env.OPENDAYLIGHT_ARGS.split(' ') : [],
+    process: null,
+    status: 'stopped',
+    logFile: null,
+    requiresJavaLayout: false,
+    headful: true
   }
 };
 
@@ -102,6 +116,13 @@ function buildTailCommand(cwd, logPath) {
   return `${cd} && ${tail}; ${pause}`;
 }
 
+function buildHeadfulCommand(cwd, command, args = []) {
+  const cd = `cd ${shellEscapeArg(cwd)}`;
+  const cmdParts = [shellEscapeArg(command), ...args.map(shellEscapeArg)];
+  const cmd = cmdParts.join(' ');
+  return `${cd} && ${cmd}`;
+}
+
 function openTerminalForLog(title, cwd, logPath) {
   // Allow disabling via env if needed
   if ((process.env.DISABLE_TERMINAL_OPEN || 'false').toLowerCase() === 'true') return;
@@ -153,13 +174,79 @@ async function startProcess(processKey) {
   } catch (e) {
     throw new Error(`${proc.name} path does not exist: ${proc.cwd}`);
   }
-  const outDir = path.join(proc.cwd, 'out');
-  const libDir = path.join(proc.cwd, 'lib');
-  if (!fsSync.existsSync(outDir)) {
-    throw new Error(`${proc.name} is not compiled. Missing 'out' directory at ${outDir}`);
+
+  if (!proc.command) {
+    throw new Error(`${proc.name} command is not configured. Check your backend .env file.`);
   }
-  if (!fsSync.existsSync(libDir)) {
-    throw new Error(`${proc.name} missing 'lib' directory at ${libDir}`);
+
+  // For Java-based middleware components, enforce expected build layout
+  if (proc.requiresJavaLayout !== false) {
+    const outDir = path.join(proc.cwd, 'out');
+    const libDir = path.join(proc.cwd, 'lib');
+    if (!fsSync.existsSync(outDir)) {
+      throw new Error(`${proc.name} is not compiled. Missing 'out' directory at ${outDir}`);
+    }
+    if (!fsSync.existsSync(libDir)) {
+      throw new Error(`${proc.name} missing 'lib' directory at ${libDir}`);
+    }
+  }
+
+  // Headful mode: run inside a real terminal so user can interact
+  if (proc.headful) {
+    const term = findTerminal();
+    if (!term) {
+      throw new Error('No supported terminal emulator found. Cannot start headful process.');
+    }
+
+    const shellCmd = buildHeadfulCommand(proc.cwd, proc.command, proc.args || []);
+    const args = term.buildArgs(proc.name, proc.cwd, shellCmd);
+
+    try {
+      const childProcess = spawn(term.cmd, args, {
+        cwd: proc.cwd,
+        env: process.env,
+        detached: false,
+        stdio: 'ignore'
+      });
+
+      proc.process = childProcess;
+      proc.status = 'running';
+      proc.logFile = null;
+
+      console.log(`Started ${proc.name} in interactive terminal '${term.cmd}' with PID ${childProcess.pid}`);
+
+      childProcess.on('close', (code) => {
+        proc.process = null;
+        proc.status = 'stopped';
+
+        if (logService) {
+          logService.broadcastLog(processKey, `\n[${proc.name} terminal exited with code ${code}]\n`);
+        }
+
+        console.log(`${proc.name} terminal exited with code ${code}`);
+      });
+
+      childProcess.on('error', (error) => {
+        proc.process = null;
+        proc.status = 'error';
+
+        if (logService) {
+          logService.broadcastLog(processKey, `\n[Process error: ${error.message}]\n`);
+        }
+
+        console.error(`${proc.name} error:`, error);
+      });
+
+      return {
+        success: true,
+        message: `${proc.name} started in interactive terminal`,
+        logFile: null,
+        pid: childProcess.pid
+      };
+    } catch (error) {
+      proc.status = 'error';
+      throw new Error(`Failed to start ${proc.name}: ${error.message}`);
+    }
   }
   
   const logsDir = await ensureLogsDir();

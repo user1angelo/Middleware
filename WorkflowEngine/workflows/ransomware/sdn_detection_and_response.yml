@@ -1,0 +1,912 @@
+name: ODL Ransomware Detection & Prevention Workflow
+version: 2.0.0
+description: OpenDaylight-based SDN workflow for ransomware detection and network security
+
+# Global Configuration
+config:
+  environment: production
+  log_level: info
+  retry_policy:
+    max_attempts: 3
+    backoff: exponential
+    initial_delay: 2s
+  detection_mode: active # active, passive, learning
+  auto_mitigation: true
+
+# OpenDaylight Controller Configuration
+controllers:
+  - name: primary_controller
+    type: opendaylight
+    host: 10.0.0.10
+    port: 8181
+    restconf_port: 8181
+    credentials:
+      username: ${ODL_USER}
+      password: ${ODL_PASS}
+    api_version: oxygen
+    features:
+      - l2switch
+      - openflowplugin
+      - ovsdb
+      - mdsal
+      - dlux
+      - flow_management
+      - topology_discovery
+      - statistics_collection
+      - packet_processing
+    karaf_features:
+      - odl-restconf-all
+      - odl-l2switch-switch
+      - odl-openflowplugin-flow-services
+      - odl-openflowplugin-flow-statistics
+      - odl-mdsal-apidocs
+      - odl-dlux-core
+      - odl-openflowplugin-southbound
+  
+  - name: backup_controller
+    type: opendaylight
+    host: 10.0.0.11
+    port: 8181
+    restconf_port: 8181
+    failover: true
+    sync_mode: active_standby
+
+# Network Topology
+topology:
+  switches:
+    - id: s1
+      dpid: "00:00:00:00:00:00:00:01"
+      type: ovs
+      location: datacenter-core
+      ports: 48
+      monitoring: deep_packet_inspection
+      
+    - id: s2
+      dpid: "00:00:00:00:00:00:00:02"
+      type: ovs
+      location: datacenter-edge
+      ports: 48
+      monitoring: flow_statistics
+      
+    - id: s3
+      dpid: "00:00:00:00:00:00:00:03"
+      type: ovs
+      location: user-segment
+      ports: 24
+      monitoring: deep_packet_inspection
+
+  links:
+    - source: s1
+      source_port: 1
+      destination: s2
+      destination_port: 1
+      bandwidth: 10Gbps
+      
+    - source: s2
+      source_port: 2
+      destination: s3
+      destination_port: 1
+      bandwidth: 10Gbps
+
+# Ransomware Detection Signatures
+ransomware_signatures:
+  behavioral_patterns:
+    - name: dharma
+      indicators:
+        - rapid_smb_connections: true
+          threshold: 50
+          timeframe: 60s
+        - rdp_brute_force: true
+          failed_attempts: 10
+          timeframe: 30s
+        - file_extension_changes: [".dharma", ".wallet", ".zzzzz"]
+        - encryption_traffic_spike: 500%
+        - c2_domains: ["*.onion", "dharma-c2.com"]
+        - ports: [445, 3389, 135, 139]
+    
+    - name: wannacry
+      indicators:
+        - smb_exploit: "MS17-010"
+        - rapid_propagation: true
+          connections_per_second: 100
+        - file_extensions: [".WNCRY", ".wcry"]
+        - kill_switch_domain_check: true
+        - ports: [445, 137, 138, 139]
+        - encryption_pattern: rapid_file_access
+    
+    - name: locky
+      indicators:
+        - email_attachment_origin: true
+        - macro_execution_pattern: true
+        - file_extensions: [".locky", ".zepto", ".odin"]
+        - dns_requests_spike: 1000
+          timeframe: 60s
+        - dga_detection: true
+        - c2_communication: high_frequency
+    
+    - name: ryuk
+      indicators:
+        - lateral_movement: true
+        - privilege_escalation_attempts: true
+        - file_extensions: [".ryk", ".RYK"]
+        - backup_deletion_traffic: true
+        - scheduled_task_creation: true
+        - ports: [445, 135, 139]
+        - encryption_scope: network_wide
+    
+    - name: revil_sodinokibi
+      indicators:
+        - supply_chain_origin: true
+        - file_extensions: [".revil"]
+        - double_extortion_traffic: true
+        - data_exfiltration: large_volumes
+        - tor_communication: true
+        - ransom_note_pattern: "readme.txt"
+    
+    - name: maze
+      indicators:
+        - data_exfiltration_before_encryption: true
+        - public_data_leak_threat: true
+        - file_extensions: [".maze"]
+        - smb_lateral_movement: true
+        - exfiltration_size: ">10GB"
+        - encryption_delay: present
+    
+    - name: conti
+      indicators:
+        - domain_compromise: true
+        - ad_exploitation: true
+        - file_extensions: [".conti"]
+        - vss_deletion_traffic: true
+        - network_share_targeting: true
+        - rapid_encryption: enterprise_scale
+
+  network_anomalies:
+    - name: encryption_traffic_spike
+      description: Unusual increase in encrypted traffic volume
+      threshold: 300%
+      baseline_period: 24h
+      detection_window: 5m
+      severity: high
+    
+    - name: smb_scanning
+      description: Rapid SMB connection attempts
+      threshold: 30
+      timeframe: 60s
+      ports: [445, 139, 137, 138]
+      severity: critical
+    
+    - name: rdp_brute_force
+      description: Multiple failed RDP authentication attempts
+      threshold: 5
+      timeframe: 60s
+      port: 3389
+      severity: critical
+    
+    - name: lateral_movement
+      description: Unusual internal network scanning
+      patterns:
+        - multiple_host_connections: ">20"
+          timeframe: 5m
+        - port_scanning: sequential
+        - protocol: [SMB, RDP, WMI]
+      severity: high
+    
+    - name: c2_communication
+      description: Command and control traffic detection
+      indicators:
+        - beacon_intervals: regular
+        - unusual_dns_queries: true
+        - dga_domains: true
+        - tor_nodes: true
+        - known_c2_ips: true
+      severity: critical
+    
+    - name: data_exfiltration
+      description: Large outbound data transfers
+      threshold: 1GB
+      timeframe: 10m
+      destinations: external
+      protocols: [HTTPS, FTP, DNS]
+      severity: high
+    
+    - name: backup_targeting
+      description: Attempts to access or delete backups
+      indicators:
+        - vss_deletion: true
+        - backup_server_access: unusual
+        - backup_port_scanning: [3260, 3261]
+      severity: critical
+
+# Threat Intelligence Integration
+threat_intelligence:
+  feeds:
+    - name: abuse_ch
+      type: ip_blacklist
+      url: https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+      update_interval: 1h
+      
+    - name: ransomware_tracker
+      type: domain_blacklist
+      url: https://ransomwaretracker.abuse.ch/downloads/RW_DOMBL.txt
+      update_interval: 1h
+      
+    - name: emerging_threats
+      type: snort_rules
+      url: https://rules.emergingthreats.net/open/
+      update_interval: 6h
+      
+    - name: alienvault_otx
+      type: ioc_feed
+      api_key: ${ALIENVAULT_API_KEY}
+      update_interval: 2h
+      
+    - name: misp
+      type: threat_sharing
+      url: ${MISP_URL}
+      api_key: ${MISP_API_KEY}
+      update_interval: 30m
+
+  local_intelligence:
+    - name: known_malicious_ips
+      file: /etc/odl/threat-intel/malicious_ips.txt
+      format: cidr
+      
+    - name: ransomware_c2_domains
+      file: /etc/odl/threat-intel/c2_domains.txt
+      format: fqdn
+
+# Workflow Stages
+workflow:
+  stages:
+    - name: initialization
+      description: Initialize ODL controller and security components
+      tasks:
+        - name: connect_controller
+          action: controller.connect
+          params:
+            controller: primary_controller
+            timeout: 30s
+            restconf_endpoint: /restconf
+            verify_ssl: false
+          
+        - name: load_threat_intelligence
+          action: threat_intel.load
+          params:
+            feeds: all
+            validate: true
+            
+        - name: verify_topology
+          action: topology.discover
+          params:
+            depth: full
+            validate: true
+            topology_id: flow:1
+            restconf_path: /restconf/operational/network-topology:network-topology
+          
+        - name: sync_switches
+          action: switch.sync_all
+          params:
+            clear_flows: false
+            datastore: config
+            ovsdb_sync: true
+            enable_statistics: true
+
+    - name: baseline_learning
+      description: Learn normal network behavior patterns
+      depends_on: initialization
+      duration: 24h
+      tasks:
+        - name: collect_traffic_baselines
+          action: baseline.collect
+          params:
+            metrics:
+              - flow_count_per_host
+              - bandwidth_utilization
+              - connection_patterns
+              - protocol_distribution
+              - port_usage
+              - smb_traffic_volume
+              - rdp_sessions
+            interval: 5m
+            
+        - name: build_behavioral_profiles
+          action: ml.train
+          params:
+            algorithm: isolation_forest
+            features:
+              - connections_per_minute
+              - unique_destinations
+              - data_volume
+              - protocol_ratios
+            anomaly_threshold: 0.95
+
+    - name: flow_configuration
+      description: Configure base flows and security policies
+      depends_on: initialization
+      tasks:
+        - name: install_default_flows
+          action: flow.install
+          params:
+            table_id: 0
+            priority: 50
+            restconf_method: PUT
+            datastore: config
+            flow_node_inventory: true
+            rules:
+              - id: allow-established
+                table_id: 0
+                priority: 100
+                match:
+                  tcp_flags: ACK
+                instructions:
+                  - instruction:
+                      order: 0
+                      apply_actions:
+                        action:
+                          - order: 0
+                            output_action:
+                              output_node_connector: NORMAL
+              
+              - id: default-forward
+                table_id: 0
+                priority: 50
+                match: {}
+                instructions:
+                  - instruction:
+                      order: 0
+                      go_to_table:
+                        table_id: 1
+        
+        - name: install_security_flows
+          action: flow.install
+          params:
+            table_id: 1
+            priority: 200
+            rules:
+              - id: block-smb-scanning
+                table_id: 1
+                priority: 250
+                match:
+                  ethernet_match:
+                    ethernet_type:
+                      type: 2048
+                  ip_match:
+                    ip_protocol: 6
+                  tcp_destination_port: 445
+                instructions:
+                  - instruction:
+                      order: 0
+                      apply_actions:
+                        action:
+                          - order: 0
+                            output_action:
+                              output_node_connector: CONTROLLER
+                              max_length: 65535
+              
+              - id: monitor-rdp
+                table_id: 1
+                priority: 250
+                match:
+                  ethernet_match:
+                    ethernet_type:
+                      type: 2048
+                  ip_match:
+                    ip_protocol: 6
+                  tcp_destination_port: 3389
+                instructions:
+                  - instruction:
+                      order: 0
+                      apply_actions:
+                        action:
+                          - order: 0
+                            output_action:
+                              output_node_connector: CONTROLLER
+                              max_length: 65535
+
+    - name: ransomware_detection
+      description: Active ransomware detection and analysis
+      depends_on: flow_configuration
+      continuous: true
+      tasks:
+        - name: monitor_smb_traffic
+          action: detector.monitor
+          params:
+            protocol: SMB
+            ports: [445, 139, 137, 138]
+            analysis:
+              - connection_rate
+              - unique_targets
+              - failed_authentications
+              - exploit_patterns
+            alert_threshold:
+              connections_per_minute: 30
+              unique_targets: 20
+              failed_auth: 5
+            
+        - name: monitor_rdp_traffic
+          action: detector.monitor
+          params:
+            protocol: RDP
+            port: 3389
+            analysis:
+              - authentication_attempts
+              - source_diversity
+              - brute_force_patterns
+            alert_threshold:
+              failed_attempts: 5
+              timeframe: 60s
+        
+        - name: detect_lateral_movement
+          action: detector.lateral_movement
+          params:
+            indicators:
+              - rapid_host_scanning
+              - privilege_escalation
+              - credential_reuse
+              - admin_share_access
+            correlation_window: 5m
+            
+        - name: detect_encryption_activity
+          action: detector.encryption
+          params:
+            indicators:
+              - traffic_volume_spike: 300%
+              - entropy_analysis: high
+              - file_access_patterns: rapid_sequential
+              - cpu_spike_correlation: true
+            
+        - name: detect_c2_communication
+          action: detector.c2
+          params:
+            indicators:
+              - beacon_detection: true
+              - dga_domains: true
+              - known_c2_ips: true
+              - tor_exit_nodes: true
+              - unusual_dns_patterns: true
+            threat_intel_correlation: true
+            
+        - name: detect_data_exfiltration
+          action: detector.exfiltration
+          params:
+            threshold: 500MB
+            timeframe: 10m
+            destinations: external_only
+            protocols: [HTTPS, DNS, ICMP]
+            chunking_detection: true
+
+    - name: threat_correlation
+      description: Correlate multiple indicators for ransomware detection
+      depends_on: ransomware_detection
+      continuous: true
+      tasks:
+        - name: correlate_indicators
+          action: correlation.analyze
+          params:
+            correlation_rules:
+              - name: dharma_detection
+                conditions:
+                  - smb_scanning: true
+                  - rdp_brute_force: true
+                  - encryption_spike: true
+                weight: 0.9
+                confidence: high
+              
+              - name: wannacry_detection
+                conditions:
+                  - smb_exploit: MS17-010
+                  - rapid_propagation: true
+                  - kill_switch_check: true
+                weight: 0.95
+                confidence: critical
+              
+              - name: generic_ransomware
+                conditions:
+                  - lateral_movement: true
+                  - encryption_activity: true
+                  - backup_targeting: true
+                weight: 0.85
+                confidence: high
+            
+            scoring:
+              algorithm: weighted_sum
+              threshold: 0.7
+              
+        - name: behavioral_analysis
+          action: ml.analyze
+          params:
+            model: isolation_forest
+            real_time: true
+            features:
+              - connection_patterns
+              - traffic_volumes
+              - protocol_distribution
+              - temporal_patterns
+            anomaly_action: alert
+
+    - name: automated_response
+      description: Automated mitigation and containment
+      depends_on: threat_correlation
+      continuous: true
+      tasks:
+        - name: isolate_infected_host
+          action: mitigation.isolate
+          trigger: ransomware_detected
+          params:
+            method: flow_blocking
+            scope: bidirectional
+            duration: permanent
+            exceptions:
+              - management_vlan
+              - siem_collector
+            
+        - name: block_c2_communication
+          action: mitigation.block
+          trigger: c2_detected
+          params:
+            target: destination
+            protocols: all
+            update_threat_intel: true
+            
+        - name: rate_limit_scanning
+          action: mitigation.rate_limit
+          trigger: port_scanning_detected
+          params:
+            protocol: [SMB, RDP]
+            limit: 5_per_minute
+            duration: 1h
+            
+        - name: quarantine_segment
+          action: mitigation.segment_isolation
+          trigger: lateral_movement_detected
+          params:
+            scope: vlan
+            maintain_uplink: false
+            emergency_mode: true
+            
+        - name: snapshot_traffic
+          action: forensics.capture
+          trigger: ransomware_detected
+          params:
+            duration: 5m
+            depth: full_packet
+            storage: /var/log/odl/pcap/
+            retention: 30d
+
+    - name: monitoring_telemetry
+      description: Continuous monitoring and metrics collection
+      depends_on: flow_configuration
+      continuous: true
+      tasks:
+        - name: collect_flow_statistics
+          action: telemetry.flow_stats
+          params:
+            interval: 10s
+            nodes: all
+            tables: [0, 1, 2]
+            restconf_path: /restconf/operational/opendaylight-inventory:nodes
+            
+        - name: collect_port_statistics
+          action: telemetry.port_stats
+          params:
+            interval: 10s
+            metrics:
+              - bytes_transmitted
+              - bytes_received
+              - packets_transmitted
+              - packets_received
+              - errors
+              - drops
+            
+        - name: packet_analysis
+          action: telemetry.packet_in
+          params:
+            sampling_rate: 1_in_100
+            analysis:
+              - protocol_distribution
+              - entropy_calculation
+              - payload_inspection
+            
+        - name: export_metrics
+          action: telemetry.export
+          params:
+            protocol: netflow_v9
+            destination: 10.0.0.100:2055
+            collectors:
+              - type: siem
+                host: 10.0.0.200
+                port: 514
+                protocol: syslog
+              - type: prometheus
+                host: 10.0.0.201
+                port: 9090
+                scrape_interval: 15s
+
+    - name: alerting_notification
+      description: Alert generation and notification system
+      depends_on: threat_correlation
+      continuous: true
+      tasks:
+        - name: generate_alerts
+          action: alerting.generate
+          params:
+            severity_levels:
+              - critical: immediate
+              - high: 1m
+              - medium: 5m
+              - low: 15m
+            deduplication: 5m
+            
+        - name: notify_security_team
+          action: notification.send
+          params:
+            channels:
+              - type: email
+                recipients:
+                  - soc@company.com
+                  - security@company.com
+                severity: [critical, high]
+              
+              - type: slack
+                webhook: ${SLACK_WEBHOOK_URL}
+                channel: "#security-alerts"
+                severity: [critical, high, medium]
+              
+              - type: pagerduty
+                api_key: ${PAGERDUTY_API_KEY}
+                severity: critical
+              
+              - type: syslog
+                host: 10.0.0.200
+                port: 514
+                severity: all
+            
+            templates:
+              ransomware_detected: |
+                CRITICAL: Ransomware Activity Detected
+                Type: {{ransomware_type}}
+                Source: {{source_ip}}
+                Target: {{target_hosts}}
+                Confidence: {{confidence_score}}
+                Actions Taken: {{mitigation_actions}}
+                Timestamp: {{timestamp}}
+
+# Event Handlers
+event_handlers:
+  - event: ransomware_detected
+    priority: critical
+    actions:
+      - isolate_host: true
+      - block_traffic: bidirectional
+      - capture_forensics: true
+      - notify:
+          channels: [email, slack, pagerduty]
+          severity: critical
+      - log:
+          destination: siem
+          detail: full
+  
+  - event: smb_exploit_attempt
+    priority: critical
+    actions:
+      - block_source_ip: true
+      - update_threat_intel: true
+      - notify:
+          channels: [slack, syslog]
+      - trigger_investigation: true
+  
+  - event: lateral_movement_detected
+    priority: high
+    actions:
+      - segment_isolation: true
+      - increase_monitoring: true
+      - notify:
+          channels: [email, slack]
+      - forensic_capture: 10m
+  
+  - event: c2_communication_detected
+    priority: critical
+    actions:
+      - block_destination: permanent
+      - isolate_source: true
+      - update_firewall_rules: true
+      - notify:
+          channels: [email, pagerduty]
+  
+  - event: data_exfiltration_detected
+    priority: high
+    actions:
+      - rate_limit: aggressive
+      - capture_traffic: full
+      - alert_dpo: true
+      - notify:
+          channels: [email, slack]
+  
+  - event: encryption_spike_detected
+    priority: high
+    actions:
+      - increase_monitoring: true
+      - prepare_isolation: standby
+      - notify:
+          channels: [slack]
+      - correlation_check: true
+
+# Machine Learning Models
+machine_learning:
+  models:
+    - name: anomaly_detection
+      type: isolation_forest
+      training_data: 7d
+      features:
+        - connections_per_minute
+        - bytes_per_connection
+        - unique_destinations
+        - port_diversity
+        - protocol_ratios
+      threshold: 0.95
+      retrain_interval: 24h
+      
+    - name: ransomware_classifier
+      type: random_forest
+      training_data: labeled_dataset
+      features:
+        - smb_connection_rate
+        - rdp_attempts
+        - encryption_indicators
+        - lateral_movement_score
+        - c2_likelihood
+      accuracy_target: 0.98
+      
+    - name: dga_detector
+      type: lstm
+      input: dns_queries
+      sequence_length: 100
+      threshold: 0.9
+
+# Forensics and Logging
+forensics:
+  packet_capture:
+    enabled: true
+    trigger_events:
+      - ransomware_detected
+      - lateral_movement
+      - c2_communication
+    duration: 10m
+    storage: /var/log/odl/forensics/
+    retention: 90d
+    
+  flow_logging:
+    enabled: true
+    level: detailed
+    fields:
+      - timestamp
+      - source_ip
+      - destination_ip
+      - source_port
+      - destination_port
+      - protocol
+      - bytes
+      - packets
+      - flags
+      - duration
+    storage: /var/log/odl/flows/
+    rotation: daily
+    
+  incident_database:
+    enabled: true
+    storage: postgresql
+    connection: ${POSTGRES_CONNECTION_STRING}
+    retention: 365d
+
+# Validation and Testing
+validation:
+  - name: detection_accuracy
+    type: test
+    schedule: daily
+    params:
+      test_dataset: /etc/odl/test/ransomware_samples.pcap
+      expected_detections: 95%
+  
+  - name: false_positive_rate
+    type: metric
+    schedule: weekly
+    threshold: 5%
+  
+  - name: response_time
+    type: performance
+    schedule: hourly
+    target: "<30s"
+
+# Backup and Recovery
+backup:
+  configuration:
+    enabled: true
+    schedule: "0 */6 * * *"
+    destination: /backup/odl/
+    retention: 30d
+    
+  threat_intelligence:
+    enabled: true
+    schedule: "0 0 * * *"
+    
+  learned_baselines:
+    enabled: true
+    schedule: "0 2 * * *"
+
+# Rollback Configuration
+rollback:
+  enabled: true
+  snapshots:
+    retention: 20
+    interval: 1h
+  triggers:
+    - validation_failure
+    - manual
+    - critical_error
+
+# Logging Configuration
+logging:
+  destinations:
+    - type: file
+      path: /var/log/odl/security.log
+      level: info
+      rotation:
+        size: 500MB
+        count: 10
+    
+    - type: syslog
+      host: 10.0.0.200
+      port: 514
+      level: warning
+      facility: local0
+    
+    - type: elasticsearch
+      hosts:
+        - 10.0.0.201:9200
+      index: odl-security
+      level: debug
+      
+    - type: splunk
+      host: 10.0.0.202
+      port: 8088
+      token: ${SPLUNK_HEC_TOKEN}
+      level: info
+
+# Performance Tuning
+performance:
+  flow_table_optimization: true
+  statistics_caching: true
+  parallel_processing: true
+  worker_threads: 8
+  queue_size: 10000
+  
+# Compliance and Reporting
+reporting:
+  - name: daily_security_summary
+    schedule: "0 6 * * *"
+    format: pdf
+    recipients:
+      - security-team@company.com
+    content:
+      - detected_threats
+      - blocked_attacks
+      - false_positives
+      - system_health
+  
+  - name: weekly_trend_analysis
+    schedule: "0 8 * * 1"
+    format: html
+    recipients:
+      - management@company.com
+    content:
+      - threat_trends
+      - detection_accuracy
+      - response_effectiveness
+  
+  - name: compliance_report
+    schedule: monthly
+    format: pdf
+    standards: [NIST, ISO27001, GDPR]
+    recipients:
+      - compliance@company.com

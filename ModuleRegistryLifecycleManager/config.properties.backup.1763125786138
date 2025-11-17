@@ -6,7 +6,7 @@ db.user=postgres
 db.password=user
 
 # RabbitMQ connection settings
-rabbitmq.host=192.168.137.185
+rabbitmq.host=192.168.1.8
 rabbitmq.port=5672
 rabbitmq.user=user
 rabbitmq.password=password
