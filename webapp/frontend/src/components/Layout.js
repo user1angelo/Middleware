@@ -7,10 +7,10 @@ const Layout = ({ children }) => {
   const navItems = [
     { path: '/', label: 'Home' },
     { path: '/control', label: 'Control Panel' },
+    { path: '/modules', label: 'User-Defined Modules' },
     { path: '/logs', label: 'Logs' },
     { path: '/workflows', label: 'Workflows' },
     { path: '/config', label: 'Configuration' },
-    { path: '/modules', label: 'Modules' },
     { path: '/test', label: 'Testing' }
   ];
   

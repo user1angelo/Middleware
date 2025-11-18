@@ -1,0 +1,58 @@
+name: "PRTG Ransomware Detection and SDN Isolation"
+version: 1.0
+description: >
+  Responds to PRTG-detected ransomware-like behavior by initiating SDN-based
+  host isolation via OpenDaylight and logging the event for visibility.
+
+trigger:
+  event_type: "alerts.host.prtg"
+  # Initial heuristic until Akira-specific conditions are known
+  condition: "{{ trigger.payload.ransomware_family == 'Akira' or trigger.payload.message contains 'ransomware' }}"
+
+steps:
+  - name: "Log PRTG Ransomware Detection Event"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "RANSOMWARE_DETECTED"
+        data:
+          event_id: "{{ trigger.event_id }}"
+          host_ip: "{{ trigger.payload.host_ip }}"
+          host_name: "{{ trigger.payload.host_name }}"
+          severity: "{{ trigger.payload.severity }}"
+          family: "{{ trigger.payload.ransomware_family }}"
+          source: "PRTG"
+          timestamp: "{{ trigger.timestamp }}"
+
+  - name: "Initiate SDN Host Isolation via OpenDaylight"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        # This is interpreted by the WorkflowEngine as a workflow_command
+        # with command = INITIATE_MITIGATION and parameters = data
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.host_ip }}"
+          targetMac: "{{ trigger.payload.mac_address }}"
+          hostId: "{{ trigger.payload.host_name }}"
+          action: "BLOCK_IP"  # baseline: IP-based isolation; MAC if available
+          sdn_controller: "opendaylight"
+          priority: "high"
+          justification: "PRTG detected ransomware-like behavior on {{ trigger.payload.host_name }} ({{ trigger.payload.host_ip }})."
+          family: "{{ trigger.payload.ransomware_family }}"
+          sourceEventId: "{{ trigger.event_id }}"
+
+  - name: "Write Audit Log for Dashboard"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "AUDIT_LOG"
+        data:
+          action: "RANSOMWARE_ALERT"
+          source: "PRTG"
+          severity: "critical"
+          host_ip: "{{ trigger.payload.host_ip }}"
+          host_name: "{{ trigger.payload.host_name }}"
+          family: "{{ trigger.payload.ransomware_family }}"
+          message: "PRTG detected ransomware-like behavior on {{ trigger.payload.host_name }} ({{ trigger.payload.host_ip }}). SDN isolation requested."
+          related_event_id: "{{ trigger.event_id }}"

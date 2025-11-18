@@ -1,6 +1,3 @@
-# Configuration files with sensitive credentials
-config.properties
-
 # Compiled class files
 out/
 *.class
@@ -16,4 +13,3 @@ query_responses/*.json
 # OS files
 .DS_Store
 Thumbs.db
-

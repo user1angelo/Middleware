@@ -11,6 +11,7 @@ const configService = require('./services/configService');
 const workflowService = require('./services/workflowService');
 const moduleHealthService = require('./services/moduleHealthService');
 const logService = require('./services/logService');
+const udmConfigService = require('./services/udmConfigService');
 
 const app = express();
 const server = http.createServer(app);
@@ -143,6 +144,34 @@ app.get('/api/modules/health', async (req, res) => {
   try {
     const modules = await moduleHealthService.getModuleHealth();
     res.json(modules);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== UDM Config Routes =====
+app.get('/api/udm-configs', async (req, res) => {
+  try {
+    const result = await udmConfigService.listConfigs();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/udm-configs/:id', async (req, res) => {
+  try {
+    const result = await udmConfigService.getConfig(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/udm-configs/:id', async (req, res) => {
+  try {
+    const result = await udmConfigService.updateConfig(req.params.id, req.body.content);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

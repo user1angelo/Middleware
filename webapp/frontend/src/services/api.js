@@ -21,6 +21,12 @@ export const configAPI = {
   update: (program, content) => api.put(`/config/${program}`, { content })
 };
 
+export const udmConfigAPI = {
+  list: () => api.get('/udm-configs'),
+  get: (id) => api.get(`/udm-configs/${id}`),
+  update: (id, content) => api.put(`/udm-configs/${id}`, { content })
+};
+
 export const workflowAPI = {
   list: () => api.get('/workflows'),
   get: (category, name) => api.get(`/workflows/${category}/${name}`),
