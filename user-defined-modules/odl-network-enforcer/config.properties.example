@@ -1,0 +1,20 @@
+# ODL Network Enforcer Configuration
+
+# RabbitMQ Configuration
+rabbitmq.host=192.168.86.76
+rabbitmq.port=5672
+rabbitmq.user=guest
+rabbitmq.password=guest
+rabbitmq.workflow_command_queue.name=workflow_command_queue
+
+# OpenDaylight Configuration
+odl.host=localhost
+odl.port=8181
+odl.user=admin
+odl.password=admin
+
+# Flow Configuration
+flow.default.priority=100
+flow.isolation.priority=1000
+flow.idle.timeout=0
+flow.hard.timeout=0
