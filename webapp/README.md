@@ -36,14 +36,40 @@ A minimalist web dashboard for managing and monitoring the Middleware system.
 
 ## Installation
 
-### 1. Install Backend Dependencies
+### Option A (Recommended): From repository root
+
+After cloning the repository:
+
+```bash
+cd Middleware
+npm install
+```
+
+This will:
+- Install backend dependencies (`webapp/backend`)
+- Install frontend dependencies (`webapp/frontend`)
+- Create `webapp/backend/.env` from `.env.example` if it does not exist
+
+You can then start everything with:
+
+```bash
+npm run start
+```
+
+This runs the backend and frontend in parallel.
+
+### Option B: Manual per-app install
+
+If you prefer to manage each app separately:
+
+#### 1. Install Backend Dependencies
 
 ```bash
 cd webapp/backend
 npm install
 ```
 
-### 2. Install Frontend Dependencies
+#### 2. Install Frontend Dependencies
 
 ```bash
 cd webapp/frontend
