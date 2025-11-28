@@ -8,6 +8,7 @@ const Layout = ({ children }) => {
     { path: '/', label: 'Home' },
     { path: '/control', label: 'Control Panel' },
     { path: '/modules', label: 'User-Defined Modules' },
+    { path: '/sdk', label: 'SDK Docs' },
     { path: '/logs', label: 'Logs' },
     { path: '/workflows', label: 'Workflows' },
     { path: '/config', label: 'Configuration' },

@@ -8,6 +8,7 @@ import Workflows from './pages/Workflows';
 import Configuration from './pages/Configuration';
 import Modules from './pages/Modules';
 import Testing from './pages/Testing';
+import SdkDocs from './pages/SdkDocs';
 import './App.css';
 
 function App() {
@@ -21,7 +22,8 @@ function App() {
           <Route path="/workflows" element={<Workflows />} />
           <Route path="/config" element={<Configuration />} />
           <Route path="/modules" element={<Modules />} />
-          <Route path="/test" element={<Testing />} />
+          <Route path="/sdk/*" element={<SdkDocs />} />
+          <Route path="/logs" element={<Logs />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
