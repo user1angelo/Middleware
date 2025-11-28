@@ -1,7 +1,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 
-const MIDDLEWARE_ROOT = process.env.MIDDLEWARE_ROOT;
+const MIDDLEWARE_ROOT = process.env.MIDDLEWARE_ROOT || path.join(__dirname, '../../../');
 const UDM_CONFIG_DIR = path.join(MIDDLEWARE_ROOT, 'user-defined-modules', 'config');
 
 function toLabel(id) {

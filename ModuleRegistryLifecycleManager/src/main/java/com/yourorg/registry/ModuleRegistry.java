@@ -260,18 +260,44 @@ public class ModuleRegistry {
     }
     
     /**
-     * Load modules from database on startup
+     * Initialize modules on startup.
+     *
+     * The filesystem (user-defined-modules) is the source of truth for which
+     * modules exist. The database is used only to enrich those modules with
+     * historical state (last_heartbeat, status, metadata) when available.
      */
     public void loadModulesFromDatabase() {
+        // Always start from a clean in-memory view
+        modules.clear();
+
+        // 1) Scan filesystem to discover which modules exist and upsert them
+        //    into the database as needed.
+        try {
+            scanModulesFromFilesystem();
+        } catch (Exception e) {
+            System.err.println("⚠️  Failed to scan user-defined-modules directory: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        // 2) Load existing DB state only for modules we already know from
+        //    the filesystem (do NOT resurrect old/stale module_ids that
+        //    have no corresponding directory/config any more).
         String sql = "SELECT * FROM registered_modules";
-        
+        int updated = 0;
+
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {
-            
-            int count = 0;
+
             while (rs.next()) {
                 String moduleId = rs.getString("module_id");
+
+                // Only consider modules that exist on disk
+                RegisteredModule existing = modules.get(moduleId);
+                if (existing == null) {
+                    continue; // skip stale DB-only records
+                }
+
                 String moduleName = rs.getString("module_name");
                 String moduleType = rs.getString("module_type");
                 String capabilitiesJson = rs.getString("capabilities");
@@ -280,27 +306,116 @@ public class ModuleRegistry {
                 Timestamp lastHeartbeat = rs.getTimestamp("last_heartbeat");
                 String status = rs.getString("status");
                 String metadataJson = rs.getString("metadata");
-                
+
                 JSONArray capabilities = new JSONArray(capabilitiesJson);
                 JSONObject metadata = new JSONObject(metadataJson != null ? metadataJson : "{}");
-                
-                RegisteredModule module = new RegisteredModule(
-                    moduleId, moduleName, moduleType, capabilities,
-                    commandQueue, registeredAt, status, metadata
+
+                RegisteredModule enriched = new RegisteredModule(
+                    moduleId,
+                    moduleName != null ? moduleName : existing.getModuleName(),
+                    moduleType != null ? moduleType : existing.getModuleType(),
+                    capabilities,
+                    commandQueue != null ? commandQueue : existing.getCommandQueue(),
+                    registeredAt != null ? registeredAt : existing.getRegisteredAt(),
+                    status != null ? status : existing.getStatus(),
+                    metadata.length() > 0 ? metadata : existing.getMetadata()
                 );
-                module.setLastHeartbeat(lastHeartbeat);
-                
-                modules.put(moduleId, module);
-                count++;
+                enriched.setLastHeartbeat(lastHeartbeat != null ? lastHeartbeat : existing.getLastHeartbeat());
+
+                modules.put(moduleId, enriched);
+                updated++;
             }
-            
-            System.out.println("📂 Loaded " + count + " modules from database");
-            
+
+            System.out.println("📂 Filesystem modules initialized: " + modules.size());
+            System.out.println("📂 Enriched from database: " + updated + " modules");
+
         } catch (SQLException e) {
             System.err.println("❌ Failed to load modules from database: " + e.getMessage());
         }
     }
     
+    /**
+     * Scan the filesystem-based user-defined-modules directory and ensure
+     * there is at least a placeholder record for each module config found.
+     *
+     * Convention:
+     *   - modules.root (from ConfigLoader) points at the root directory, e.g.
+     *       ../user-defined-modules
+     *   - Under that, a `config/` folder contains one or more `*.properties`
+     *     files, where the filename (without extension) is treated as
+     *     `module_id`.
+     *
+     * This does NOT start any processes. It only ensures that a basic
+     * registered_modules row exists so the dashboard can see that the
+     * module is known, even before it has sent a registration message.
+     */
+    public void scanModulesFromFilesystem() {
+        String root = ConfigLoader.getModulesRoot();
+        java.io.File rootDir = new java.io.File(root);
+        if (!rootDir.exists() || !rootDir.isDirectory()) {
+            System.out.println("ℹ️  modules.root does not exist or is not a directory: " + root);
+            return;
+        }
+
+        java.io.File configDir = new java.io.File(rootDir, "config");
+        if (!configDir.exists() || !configDir.isDirectory()) {
+            System.out.println("ℹ️  No config/ directory under modules.root: " + configDir.getAbsolutePath());
+            return;
+        }
+
+        java.io.File[] files = configDir.listFiles((dir, name) -> name.endsWith(".properties"));
+        if (files == null || files.length == 0) {
+            System.out.println("ℹ️  No *.properties files found under " + configDir.getAbsolutePath());
+            return;
+        }
+
+        int created = 0;
+        for (java.io.File f : files) {
+            String filename = f.getName();
+            String moduleId = filename.replaceFirst("\\.properties$", "");
+
+            // Skip if already in memory (from DB or runtime registration)
+            if (modules.containsKey(moduleId)) {
+                continue;
+            }
+
+            try {
+                System.out.println("🧩 Found filesystem module config: " + filename + " (module_id=" + moduleId + ")");
+
+                // Create a very minimal placeholder module entry
+                JSONArray capabilities = new JSONArray();
+                JSONObject metadata = new JSONObject();
+                metadata.put("source", "filesystem");
+                metadata.put("config_path", f.getAbsolutePath());
+
+                Timestamp now = getCurrentManilaTimestamp();
+                RegisteredModule module = new RegisteredModule(
+                    moduleId,
+                    moduleId,               // use id as name by default
+                    "generic_udm",         // generic type
+                    capabilities,
+                    moduleId + "_commands_queue", // default command queue naming convention
+                    now,
+                    "offline",             // until a real heartbeat/registration arrives
+                    metadata
+                );
+
+                modules.put(moduleId, module);
+                saveModuleToDatabase(module);
+                created++;
+
+            } catch (Exception e) {
+                System.err.println("❌ Failed to create placeholder for module config " + filename + ": " + e.getMessage());
+            }
+        }
+
+        if (created > 0) {
+            System.out.println("📁 Registered " + created + " filesystem modules from " + configDir.getAbsolutePath());
+        } else {
+            System.out.println("ℹ️  No new filesystem modules to register (all already known).");
+        }
+    }
+
     /**
      * Get database connection
      */

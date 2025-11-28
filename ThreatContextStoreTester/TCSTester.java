@@ -2,10 +2,15 @@ import com.rabbitmq.client.*;
 import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Properties;
 import java.util.Random;
 import java.util.Scanner;
 import java.util.UUID;
@@ -16,12 +21,22 @@ import java.util.UUID;
  */
 public class TCSTester {
     
-    private static final String RABBITMQ_HOST = "192.168.1.8";
-    private static final int RABBITMQ_PORT = 5672;
-    private static final String RABBITMQ_USER = "user";
-    private static final String RABBITMQ_PASSWORD = "password";
-    private static final String ALERTS_QUEUE = "alerts_queue";
-    private static final String WORKFLOW_QUEUE = "workflow_queue";
+    private static final String CONFIG_FILE = "tcs_tester.properties";
+
+    // Default connection settings (can be overridden via config file or interactive menu)
+    private static final String DEFAULT_RABBITMQ_HOST = "localhost";
+    private static final int DEFAULT_RABBITMQ_PORT = 5672;
+    private static final String DEFAULT_RABBITMQ_USER = "user";
+    private static final String DEFAULT_RABBITMQ_PASSWORD = "password";
+    private static final String DEFAULT_ALERTS_QUEUE = "alerts_queue";
+    private static final String DEFAULT_WORKFLOW_QUEUE = "workflow_queue";
+
+    private static String rabbitmqHost = DEFAULT_RABBITMQ_HOST;
+    private static int rabbitmqPort = DEFAULT_RABBITMQ_PORT;
+    private static String rabbitmqUser = DEFAULT_RABBITMQ_USER;
+    private static String rabbitmqPassword = DEFAULT_RABBITMQ_PASSWORD;
+    private static String alertsQueue = DEFAULT_ALERTS_QUEUE;
+    private static String workflowQueue = DEFAULT_WORKFLOW_QUEUE;
     
     private static final Random random = new Random();
     private static final Scanner scanner = new Scanner(System.in);
@@ -43,30 +58,68 @@ public class TCSTester {
         "Extension modification (.encrypted)", "Shell command execution"
     };
     private static final String[] PROTOCOLS = {"TCP", "UDP", "ICMP", "HTTP", "HTTPS"};
-    
+
     public static void main(String[] args) {
-        System.out.println("╔════════════════════════════════════════╗");
-        System.out.println("║  ThreatContextStore Tester (TCSTester) ║");
-        System.out.println("╚════════════════════════════════════════╝\n");
-        
-        System.out.println("What would you like to do?");
-        System.out.println("1. Send random alerts");
-        System.out.println("2. Query alerts");
-        System.out.print("\nChoose option (1 or 2): ");
-        
-        String choice = scanner.nextLine().trim();
-        
-        try {
-            if (choice.equals("1")) {
-                handleSendAlerts();
-            } else if (choice.equals("2")) {
-                handleQueryAlerts();
-            } else {
-                System.out.println("❌ Invalid option. Exiting.");
+        // Load any saved configuration from previous runs
+        loadConfig();
+        runMainMenu();
+    }
+
+    /**
+     * Main interactive menu loop ("headful" mode)
+     */
+    private static void runMainMenu() {
+        boolean running = true;
+
+        while (running) {
+            System.out.println("╔════════════════════════════════════════╗");
+            System.out.println("║  ThreatContextStore Tester (TCSTester)asdasd ║");
+            System.out.println("╚════════════════════════════════════════╝\n");
+
+            System.out.println("Current RabbitMQ connection: ");
+            System.out.println("  Host: " + rabbitmqHost + ":" + rabbitmqPort);
+            System.out.println("  User: " + rabbitmqUser);
+            System.out.println("  Alerts queue: " + alertsQueue);
+            System.out.println("  Workflow queue: " + workflowQueue + "\n");
+
+            System.out.println("What would you like to do?");
+            System.out.println("1. Send random alerts");
+            System.out.println("2. Query alerts");
+            System.out.println("3. Configure connection");
+            System.out.println("q. Quit");
+            System.out.print("\nChoose option (1, 2, 3 or q): ");
+
+            String choice = scanner.nextLine().trim();
+
+            try {
+                switch (choice) {
+                    case "1":
+                        handleSendAlerts();
+                        break;
+                    case "2":
+                        handleQueryAlerts();
+                        break;
+                    case "3":
+                        configureConnection();
+                        break;
+                    case "q":
+                    case "Q":
+                        running = false;
+                        continue;
+                    default:
+                        System.out.println("❌ Invalid option.");
+                        break;
+                }
+            } catch (Exception e) {
+                System.err.println("❌ Error: " + e.getMessage());
+                e.printStackTrace();
             }
-        } catch (Exception e) {
-            System.err.println("❌ Error: " + e.getMessage());
-            e.printStackTrace();
+
+            if (running) {
+                System.out.println("\nPress Enter to return to the main menu...");
+                scanner.nextLine();
+                System.out.println();
+            }
         }
     }
     
@@ -109,17 +162,17 @@ public class TCSTester {
      */
     private static void sendRandomAlerts(int count, boolean infinite) throws Exception {
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost(RABBITMQ_HOST);
-        factory.setPort(RABBITMQ_PORT);
-        factory.setUsername(RABBITMQ_USER);
-        factory.setPassword(RABBITMQ_PASSWORD);
+        factory.setHost(rabbitmqHost);
+        factory.setPort(rabbitmqPort);
+        factory.setUsername(rabbitmqUser);
+        factory.setPassword(rabbitmqPassword);
         
         try (Connection connection = factory.newConnection();
              Channel channel = connection.createChannel()) {
             
             // Declare both queues
-            channel.queueDeclare(ALERTS_QUEUE, true, false, false, null);
-            channel.queueDeclare(WORKFLOW_QUEUE, true, false, false, null);
+            channel.queueDeclare(alertsQueue, true, false, false, null);
+            channel.queueDeclare(workflowQueue, true, false, false, null);
             System.out.println("\n✅ Connected to RabbitMQ");
             System.out.println("✅ Alerts will be sent to BOTH queues (alerts_queue + workflow_queue)");
             
@@ -132,8 +185,8 @@ public class TCSTester {
                     JSONObject alert = generateRandomAlert();
                     
                     // Send to both queues (broadcast pattern)
-                    channel.basicPublish("", ALERTS_QUEUE, null, alert.toString().getBytes("UTF-8"));
-                    channel.basicPublish("", WORKFLOW_QUEUE, null, alert.toString().getBytes("UTF-8"));
+                    channel.basicPublish("", alertsQueue, null, alert.toString().getBytes("UTF-8"));
+                    channel.basicPublish("", workflowQueue, null, alert.toString().getBytes("UTF-8"));
                     sent++;
                     
                     String severity = alert.getJSONObject("payload").getString("severity");
@@ -153,8 +206,8 @@ public class TCSTester {
                     JSONObject alert = generateRandomAlert();
                     
                     // Send to both queues (broadcast pattern)
-                    channel.basicPublish("", ALERTS_QUEUE, null, alert.toString().getBytes("UTF-8"));
-                    channel.basicPublish("", WORKFLOW_QUEUE, null, alert.toString().getBytes("UTF-8"));
+                    channel.basicPublish("", alertsQueue, null, alert.toString().getBytes("UTF-8"));
+                    channel.basicPublish("", workflowQueue, null, alert.toString().getBytes("UTF-8"));
                     
                     String severity = alert.getJSONObject("payload").getString("severity");
                     String alertType = alert.getJSONObject("payload").getString("alert_type");
@@ -308,16 +361,16 @@ public class TCSTester {
      */
     private static void sendQuery(JSONObject query) throws Exception {
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost(RABBITMQ_HOST);
-        factory.setPort(RABBITMQ_PORT);
-        factory.setUsername(RABBITMQ_USER);
-        factory.setPassword(RABBITMQ_PASSWORD);
+        factory.setHost(rabbitmqHost);
+        factory.setPort(rabbitmqPort);
+        factory.setUsername(rabbitmqUser);
+        factory.setPassword(rabbitmqPassword);
         
         try (Connection connection = factory.newConnection();
              Channel channel = connection.createChannel()) {
             
-            channel.queueDeclare(ALERTS_QUEUE, true, false, false, null);
-            channel.basicPublish("", ALERTS_QUEUE, null, query.toString().getBytes("UTF-8"));
+            channel.queueDeclare(alertsQueue, true, false, false, null);
+            channel.basicPublish("", alertsQueue, null, query.toString().getBytes("UTF-8"));
             
             System.out.println("\n✅ Query sent successfully!");
             System.out.println("📋 Query ID: " + query.getString("event_id"));
@@ -336,6 +389,85 @@ public class TCSTester {
     private static String getCurrentManilaTime() {
         ZonedDateTime manilaTime = ZonedDateTime.now(MANILA_ZONE);
         return manilaTime.format(ISO_FORMATTER);
+    }
+
+    /**
+     * Load configuration from local properties file if present
+     */
+    private static void loadConfig() {
+        File file = new File(CONFIG_FILE);
+        if (!file.exists()) {
+            return; // use defaults
+        }
+
+        Properties props = new Properties();
+        try (FileInputStream in = new FileInputStream(file)) {
+            props.load(in);
+            rabbitmqHost = props.getProperty("rabbitmq.host", rabbitmqHost);
+            rabbitmqPort = Integer.parseInt(props.getProperty("rabbitmq.port", String.valueOf(rabbitmqPort)));
+            rabbitmqUser = props.getProperty("rabbitmq.user", rabbitmqUser);
+            rabbitmqPassword = props.getProperty("rabbitmq.password", rabbitmqPassword);
+            alertsQueue = props.getProperty("rabbitmq.alerts_queue", alertsQueue);
+            workflowQueue = props.getProperty("rabbitmq.workflow_queue", workflowQueue);
+        } catch (IOException | NumberFormatException e) {
+            System.err.println("⚠️  Failed to load config from " + CONFIG_FILE + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Save current configuration to local properties file
+     */
+    private static void saveConfig() {
+        Properties props = new Properties();
+        props.setProperty("rabbitmq.host", rabbitmqHost);
+        props.setProperty("rabbitmq.port", String.valueOf(rabbitmqPort));
+        props.setProperty("rabbitmq.user", rabbitmqUser);
+        props.setProperty("rabbitmq.password", rabbitmqPassword);
+        props.setProperty("rabbitmq.alerts_queue", alertsQueue);
+        props.setProperty("rabbitmq.workflow_queue", workflowQueue);
+
+        try (FileOutputStream out = new FileOutputStream(CONFIG_FILE)) {
+            props.store(out, "TCSTester configuration");
+            System.out.println("\n✅ Configuration saved to " + CONFIG_FILE);
+        } catch (IOException e) {
+            System.err.println("⚠️  Failed to save config to " + CONFIG_FILE + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Interactive configuration menu
+     */
+    private static void configureConnection() {
+        System.out.println("\n=== Configure Connection ===");
+
+        rabbitmqHost = prompt("RabbitMQ host", rabbitmqHost);
+        rabbitmqPort = promptInt("RabbitMQ port", rabbitmqPort);
+        rabbitmqUser = prompt("RabbitMQ username", rabbitmqUser);
+        rabbitmqPassword = prompt("RabbitMQ password", rabbitmqPassword);
+        alertsQueue = prompt("Alerts queue name", alertsQueue);
+        workflowQueue = prompt("Workflow queue name", workflowQueue);
+
+        saveConfig();
+    }
+
+    private static String prompt(String label, String current) {
+        System.out.print(label + " [" + current + "]: ");
+        String input = scanner.nextLine().trim();
+        return input.isEmpty() ? current : input;
+    }
+
+    private static int promptInt(String label, int current) {
+        System.out.print(label + " [" + current + "]: ");
+        String input = scanner.nextLine().trim();
+        if (input.isEmpty()) {
+            return current;
+        }
+        try {
+            return Integer.parseInt(input);
+        } catch (NumberFormatException e) {
+            System.out.println("⚠️  Invalid number, keeping current value: " + current);
+            return current;
+        }
     }
 }
 

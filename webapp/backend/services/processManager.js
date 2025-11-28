@@ -3,6 +3,17 @@ const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
 
+// Root paths for middleware and user-defined modules
+const MIDDLEWARE_ROOT = process.env.MIDDLEWARE_ROOT || path.join(__dirname, '../../../');
+const UDM_ROOT = process.env.UDM_ROOT || path.join(MIDDLEWARE_ROOT, 'user-defined-modules');
+
+// Main class names for headful UDMs (used for best-effort stop)
+const HEADFUL_MAIN_CLASS_BY_KEY = {
+  suricataModule: 'com.nis1.thesis.udm.SuricataModule',
+  prtgModule: 'com.nis1.thesis.udm.PRTGModule',
+  opendaylightModule: 'com.nis1.thesis.udm.OpenDaylightModule'
+};
+
 const PROCESSES = {
   threatContextStore: {
     name: 'ThreatContextStore',
@@ -34,11 +45,34 @@ const PROCESSES = {
     logFile: null,
     requiresJavaLayout: true
   },
-  opendaylight: {
-    name: 'OpenDaylight',
-    cwd: process.env.OPENDAYLIGHT_PATH,
-    command: process.env.OPENDAYLIGHT_COMMAND,
-    args: process.env.OPENDAYLIGHT_ARGS ? process.env.OPENDAYLIGHT_ARGS.split(' ') : [],
+  // User-Defined Modules (UDM) - always started in headful terminals
+  suricataModule: {
+    name: 'Suricata UDM',
+    cwd: UDM_ROOT,
+    command: 'java',
+    args: ['-cp', 'out:../ModuleRegistryLifecycleManager/lib/*', 'com.nis1.thesis.udm.SuricataModule'],
+    process: null,
+    status: 'stopped',
+    logFile: null,
+    requiresJavaLayout: false,
+    headful: true
+  },
+  prtgModule: {
+    name: 'PRTG UDM',
+    cwd: UDM_ROOT,
+    command: 'java',
+    args: ['-cp', 'out:../ModuleRegistryLifecycleManager/lib/*', 'com.nis1.thesis.udm.PRTGModule'],
+    process: null,
+    status: 'stopped',
+    logFile: null,
+    requiresJavaLayout: false,
+    headful: true
+  },
+  opendaylightModule: {
+    name: 'OpenDaylight UDM',
+    cwd: UDM_ROOT,
+    command: 'java',
+    args: ['-cp', 'out:../ModuleRegistryLifecycleManager/lib/*', 'com.nis1.thesis.udm.OpenDaylightModule'],
     process: null,
     status: 'stopped',
     logFile: null,
@@ -63,6 +97,23 @@ async function ensureLogsDir() {
     console.error('Failed to create logs directory:', error);
   }
   return logsDir;
+}
+
+// Compile user-defined modules before starting them, so changes are always picked up
+async function compileUserDefinedModules() {
+  const compileCmd = `cd ${shellEscapeArg(UDM_ROOT)} && mkdir -p out && ` +
+    'javac -cp "../ModuleRegistryLifecycleManager/lib/*" ' +
+    '-d out src/main/java/com/nis1/thesis/udm/*.java';
+
+  console.log('[processManager] Compiling user-defined modules with:', compileCmd);
+
+  const result = spawnSync('bash', ['-lc', compileCmd], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    const stderr = result.stderr || '';
+    const stdout = result.stdout || '';
+    console.error('[processManager] UDM compile failed:', stderr || stdout);
+    throw new Error('Failed to compile user-defined modules. See backend logs for details.');
+  }
 }
 
 // Helper: find an installed terminal emulator
@@ -191,7 +242,9 @@ async function startProcess(processKey) {
     }
   }
 
-  // Headful mode: run inside a real terminal so user can interact
+  // Headful mode: run inside a real terminal so user can interact.
+  // We treat these as long-lived logical processes and do NOT tie their
+  // status to the short-lived terminal launcher PID.
   if (proc.headful) {
     const term = findTerminal();
     if (!term) {
@@ -205,43 +258,24 @@ async function startProcess(processKey) {
       const childProcess = spawn(term.cmd, args, {
         cwd: proc.cwd,
         env: process.env,
-        detached: false,
+        detached: true,
         stdio: 'ignore'
       });
 
-      proc.process = childProcess;
+      // Detach and do not track lifecycle of the external terminal
+      childProcess.unref();
+
+      proc.process = null; // no PID tracking for headful terminals
       proc.status = 'running';
       proc.logFile = null;
 
-      console.log(`Started ${proc.name} in interactive terminal '${term.cmd}' with PID ${childProcess.pid}`);
-
-      childProcess.on('close', (code) => {
-        proc.process = null;
-        proc.status = 'stopped';
-
-        if (logService) {
-          logService.broadcastLog(processKey, `\n[${proc.name} terminal exited with code ${code}]\n`);
-        }
-
-        console.log(`${proc.name} terminal exited with code ${code}`);
-      });
-
-      childProcess.on('error', (error) => {
-        proc.process = null;
-        proc.status = 'error';
-
-        if (logService) {
-          logService.broadcastLog(processKey, `\n[Process error: ${error.message}]\n`);
-        }
-
-        console.error(`${proc.name} error:`, error);
-      });
+      console.log(`Started ${proc.name} in interactive terminal '${term.cmd}'`);
 
       return {
         success: true,
         message: `${proc.name} started in interactive terminal`,
         logFile: null,
-        pid: childProcess.pid
+        pid: null
       };
     } catch (error) {
       proc.status = 'error';
@@ -355,7 +389,24 @@ async function stopProcess(processKey) {
     throw new Error(`Unknown process: ${processKey}`);
   }
   
+  // Headful UDMs are launched in detached terminals and we don't track
+  // a child PID. Use a best-effort pkill based on the main class name.
   if (!proc.process) {
+    if (proc.headful) {
+      const mainClass = HEADFUL_MAIN_CLASS_BY_KEY[processKey];
+      if (!mainClass) {
+        return { success: false, message: `${proc.name} is not running` };
+      }
+
+      try {
+        spawnSync('pkill', ['-f', mainClass], { stdio: 'ignore' });
+        proc.status = 'stopped';
+        return { success: true, message: `${proc.name} stop signal sent` };
+      } catch (e) {
+        throw new Error(`Failed to stop ${proc.name}: ${e.message}`);
+      }
+    }
+
     return { success: false, message: `${proc.name} is not running` };
   }
   
@@ -404,73 +455,78 @@ async function stopAll() {
   await Promise.allSettled(promises);
 }
 
-// Run TCSTester
+// Run TCSTester (headful: open in a real terminal and let the user drive it)
 async function runTest() {
   const testerPath = process.env.TCS_TESTER_PATH;
-  const logsDir = await ensureLogsDir();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const logFilePath = path.join(logsDir, `tcstester_${timestamp}.log`);
-  
-  return new Promise((resolve, reject) => {
-    const logStream = fsSync.createWriteStream(logFilePath);
-    
-    const childProcess = spawn('java', [
-      '-cp',
-      `.:../ThreatContextStore/lib/*`,
-      'TCSTester'
-    ], {
+
+  if (!testerPath) {
+    throw new Error('TCS_TESTER_PATH is not set in the backend environment.');
+  }
+
+  // Ensure tester path exists
+  try {
+    const stat = await fs.stat(testerPath);
+    if (!stat.isDirectory()) {
+      throw new Error(`TCSTester path is not a directory: ${testerPath}`);
+    }
+  } catch (e) {
+    throw new Error(`TCSTester path does not exist: ${testerPath}`);
+  }
+
+  const term = findTerminal();
+  if (!term) {
+    throw new Error('No supported terminal emulator found. Cannot start TCSTester in headful mode.');
+  }
+
+  const shellCmd = buildHeadfulCommand(testerPath, 'java', [
+    '-cp',
+    '.:../ThreatContextStore/lib/*',
+    'TCSTester'
+  ]);
+
+  const args = term.buildArgs('TCSTester', testerPath, shellCmd);
+
+  try {
+    const child = spawn(term.cmd, args, {
       cwd: testerPath,
-      env: process.env
+      env: process.env,
+      detached: true,
+      stdio: 'ignore'
     });
-    
-    let output = '';
-    
-    childProcess.stdout.on('data', (data) => {
-      const text = data.toString();
-      output += text;
-      logStream.write(text);
-      
-      if (logService) {
-        logService.broadcastLog('tcstester', text);
-      }
-    });
-    
-    childProcess.stderr.on('data', (data) => {
-      const text = data.toString();
-      output += text;
-      logStream.write(text);
-      
-      if (logService) {
-        logService.broadcastLog('tcstester', text);
-      }
-    });
-    
-    // Auto-respond to TCSTester prompts (option 1, then option 2 - send 10 alerts)
-    setTimeout(() => {
-      childProcess.stdin.write('1\n');
-      setTimeout(() => {
-        childProcess.stdin.write('2\n');
-        setTimeout(() => {
-          childProcess.stdin.end();
-        }, 500);
-      }, 500);
-    }, 1000);
-    
-    childProcess.on('close', (code) => {
-      logStream.close();
-      resolve({
-        success: code === 0,
-        message: `Test completed with code ${code}`,
-        output: output,
-        logFile: logFilePath
-      });
-    });
-    
-    childProcess.on('error', (error) => {
-      logStream.close();
-      reject(new Error(`Test failed: ${error.message}`));
-    });
-  });
+    child.unref();
+
+    console.log(`Opened TCSTester in interactive terminal '${term.cmd}'`);
+
+    return {
+      success: true,
+      message: 'Opened TCSTester in a separate terminal window. Use it interactively there.',
+      output: '',
+      logFile: null
+    };
+  } catch (error) {
+    throw new Error(`Failed to start TCSTester: ${error.message}`);
+  }
+}
+
+// Map filesystem/config module IDs to process keys in PROCESSES
+const UDM_CONFIG_TO_PROCESS_KEY = {
+  'suricata-module': 'suricataModule',
+  'prtg-module': 'prtgModule',
+  'opendaylight-module': 'opendaylightModule'
+};
+
+// Start a user-defined module in headful mode based on its config ID
+async function startUserModule(configId) {
+  const processKey = UDM_CONFIG_TO_PROCESS_KEY[configId];
+  if (!processKey) {
+    throw new Error(`Unknown user-defined module: ${configId}`);
+  }
+
+  // Always recompile user-defined modules before launching them so that
+  // any recent Java changes are picked up when starting from the web UI.
+  await compileUserDefinedModules();
+
+  return startProcess(processKey);
 }
 
 module.exports = {
@@ -479,5 +535,6 @@ module.exports = {
   stopProcess,
   getAllStatus,
   stopAll,
-  runTest
+  runTest,
+  startUserModule
 };

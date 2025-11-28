@@ -4,7 +4,8 @@ import { configAPI, udmConfigAPI } from '../services/api';
 const programs = [
   { key: 'threatContextStore', label: 'ThreatContextStore' },
   { key: 'moduleRegistry', label: 'ModuleRegistry' },
-  { key: 'workflowEngine', label: 'WorkflowEngine' }
+  { key: 'workflowEngine', label: 'WorkflowEngine' },
+  { key: 'tcsTester', label: 'TCSTester (Tester)' }
 ];
 
 const Configuration = () => {
@@ -38,6 +39,15 @@ const Configuration = () => {
       }));
     } catch (error) {
       console.error(`Failed to load config for ${programKey}:`, error);
+      // Ensure the textarea is still usable even if loading fails
+      setConfigs(prev => ({
+        ...prev,
+        [programKey]: prev[programKey] ?? ''
+      }));
+      setEditing(prev => ({
+        ...prev,
+        [programKey]: prev[programKey] ?? ''
+      }));
     }
   };
 

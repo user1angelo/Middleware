@@ -58,6 +58,9 @@ public class ConfigLoader {
         // Health monitoring
         properties.setProperty("health.heartbeat_timeout_seconds", "120");
         properties.setProperty("health.check_interval_seconds", "30");
+
+        // User-defined modules
+        properties.setProperty("modules.root", "../user-defined-modules");
     }
     
     // Database configuration getters
@@ -123,6 +126,11 @@ public class ConfigLoader {
     
     public static int getHealthCheckIntervalSeconds() {
         return Integer.parseInt(properties.getProperty("health.check_interval_seconds", "30"));
+    }
+
+    // User-defined modules root directory (for scanning configs or modules on disk)
+    public static String getModulesRoot() {
+        return properties.getProperty("modules.root", "../user-defined-modules");
     }
 }
 

@@ -36,7 +36,8 @@ export const workflowAPI = {
 };
 
 export const moduleAPI = {
-  getHealth: () => api.get('/modules/health')
+  getHealth: () => api.get('/modules/health'),
+  start: (id) => api.post(`/modules/${id}/start`)
 };
 
 export default api;

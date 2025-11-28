@@ -2,7 +2,11 @@ const fs = require('fs').promises;
 const path = require('path');
 const yaml = require('js-yaml');
 
-const WORKFLOWS_PATH = path.join(process.env.WORKFLOW_ENGINE_PATH, 'workflows');
+// Determine middleware root and workflow locations dynamically
+const ROOT = process.env.MIDDLEWARE_ROOT || path.join(__dirname, '../../../');
+const WORKFLOW_ENGINE_ROOT = process.env.WORKFLOW_ENGINE_PATH || path.join(ROOT, 'WorkflowEngine');
+// WORKFLOWS_PATH can be overridden explicitly, otherwise defaults under WorkflowEngine
+const WORKFLOWS_PATH = process.env.WORKFLOWS_PATH || path.join(WORKFLOW_ENGINE_ROOT, 'workflows');
 
 // List all workflows organized by category
 async function listWorkflows() {
@@ -145,7 +149,7 @@ async function deleteWorkflow(category, name) {
     
     // Create backup before deleting
     const backupPath = path.join(
-      process.env.MIDDLEWARE_ROOT,
+      ROOT,
       'webapp',
       'backups',
       `${category}_${name}.backup.${Date.now()}`

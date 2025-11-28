@@ -1,6 +1,10 @@
 package com.nis1.thesis.udm;
 
-import com.rabbitmq.client.*;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DeliverCallback;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.FileInputStream;
@@ -56,11 +60,16 @@ public class OpenDaylightModule {
 
     private static String WORKFLOW_QUEUE = "workflow_queue";
 
-    // --- OpenDaylight RESTCONF (placeholder) --------------------------------
+    // --- OpenDaylight RESTCONF ----------------------------------------------
 
     private static String ODL_BASE_URL = "http://opendaylight:8181";
     private static String ODL_USERNAME = "admin";
     private static String ODL_PASSWORD = "admin";
+
+    // Default SDN context (node/table/priority) – can be overridden via config
+    private static String ODL_DEFAULT_SWITCH_ID = "openflow:1";
+    private static int ODL_DEFAULT_TABLE_ID = 0;
+    private static int ODL_DEFAULT_PRIORITY = 65000;
 
     // --- Time ---------------------------------------------------------------
 
@@ -243,22 +252,24 @@ public class OpenDaylightModule {
         String targetHost = params.optString("targetHost", "");
         String action = params.optString("action", "ISOLATE");
         String family = params.optString("family", "");
+        String direction = params.optString("direction", "BOTH"); // INBOUND, OUTBOUND, BOTH, SRC, DST
 
-        System.out.println("🔐 INITIATE_MITIGATION for host=" + targetHost + " action=" + action + " family=" + family);
+        System.out.println("🔐 INITIATE_MITIGATION for host=" + targetHost + " action=" + action +
+                " family=" + family + " direction=" + direction);
 
         boolean success = false;
         String details;
         try {
             if ("BLOCK_IP".equalsIgnoreCase(action) || "ISOLATE".equalsIgnoreCase(action) || "QUARANTINE".equalsIgnoreCase(action)) {
-                // Baseline: IP-based isolation
-                performBlockIp(targetHost);
+                // IP-based isolation (supports CIDR + direction)
+                performBlockIp(targetHost, direction);
                 success = true;
-                details = "Applied IP-based isolation via OpenDaylight (placeholder RESTCONF).";
+                details = "Applied IP-based isolation via OpenDaylight (RESTCONF).";
             } else if ("BLOCK_MAC".equalsIgnoreCase(action)) {
                 String mac = params.optString("targetMac", "");
                 performBlockMac(mac);
                 success = true;
-                details = "Applied MAC-based isolation via OpenDaylight (placeholder RESTCONF).";
+                details = "Applied MAC-based isolation via OpenDaylight (inprog RESTCONF).";
             } else {
                 details = "Unsupported action: " + action;
             }
@@ -283,7 +294,7 @@ public class OpenDaylightModule {
         try {
             performInstallFlowViaOdl(params);
             success = true;
-            details = "Installed SDN flow via OpenDaylight (placeholder RESTCONF).";
+            details = "Installed SDN flow via OpenDaylight (inprog RESTCONF).";
         } catch (Exception e) {
             success = false;
             details = "Error installing SDN flow: " + e.getMessage();
@@ -293,17 +304,88 @@ public class OpenDaylightModule {
     }
 
     // ---------------------------------------------------------------------
-    // OpenDaylight RESTCONF placeholders
+    // OpenDaylight RESTCONF 
     // ---------------------------------------------------------------------
 
-    private static void performBlockIp(String ip) throws IOException {
-        if (ip == null || ip.isEmpty()) {
+    private static void performBlockIp(String ipOrCidr) throws IOException {
+        // Backwards-compatible: default to blocking both directions for a single host
+        performBlockIp(ipOrCidr, "BOTH");
+    }
+
+    private static void performBlockIp(String ipOrCidr, String direction) throws IOException {
+        if (ipOrCidr == null || ipOrCidr.isEmpty()) {
             System.out.println("⚠️  No target IP provided for BLOCK_IP");
             return;
         }
-        System.out.println("[ODL] (TODO) Blocking IP via RESTCONF: " + ip);
-        // Example placeholder call; replace with real ODL RESTCONF flow programming
-        // sendOdlRequest("/restconf/operations/example:block-ip", "{...json body...}");
+
+        // Allow both single IP (10.0.0.1) and CIDR (10.0.0.0/24)
+        String ipCidr = ipOrCidr.contains("/") ? ipOrCidr : ipOrCidr + "/32";
+
+        String switchId = ODL_DEFAULT_SWITCH_ID;
+        int tableId = ODL_DEFAULT_TABLE_ID;
+        int priority = ODL_DEFAULT_PRIORITY;
+
+        boolean blockSrc = "BOTH".equalsIgnoreCase(direction)
+                || "OUTBOUND".equalsIgnoreCase(direction)
+                || "SRC".equalsIgnoreCase(direction);
+        boolean blockDst = "BOTH".equalsIgnoreCase(direction)
+                || "INBOUND".equalsIgnoreCase(direction)
+                || "DST".equalsIgnoreCase(direction);
+
+        if (!blockSrc && !blockDst) {
+            System.out.println("⚠️  Direction '" + direction + "' did not enable any blocking (expected BOTH/INBOUND/OUTBOUND/SRC/DST)");
+            return;
+        }
+
+        // --- FLOW 1: Drop outgoing traffic (src == ip) ----
+        if (blockSrc) {
+            String flowIdSrc = "block-ip-src-" + ipCidr.replace(".", "-").replace("/", "_");
+
+            JSONObject flowSrc = new JSONObject();
+            flowSrc.put("id", flowIdSrc);
+            flowSrc.put("table_id", tableId);
+            flowSrc.put("priority", priority);
+
+            JSONObject matchSrc = new JSONObject();
+            JSONObject ethTypeSrc = new JSONObject();
+            ethTypeSrc.put("type", 2048);
+            JSONObject ethMatchSrc = new JSONObject();
+            ethMatchSrc.put("ethernet-type", ethTypeSrc);
+            matchSrc.put("ethernet-match", ethMatchSrc);
+            matchSrc.put("ipv4-source", ipCidr);
+            flowSrc.put("match", matchSrc);
+
+            flowSrc.put("instructions", buildDropInstructions());
+
+            // send flow 1
+            sendFlowToOdl(switchId, tableId, flowIdSrc, flowSrc);
+        }
+
+        // --- FLOW 2: Drop incoming traffic (dst == ip) ----
+        if (blockDst) {
+            String flowIdDst = "block-ip-dst-" + ipCidr.replace(".", "-").replace("/", "_");
+
+            JSONObject flowDst = new JSONObject();
+            flowDst.put("id", flowIdDst);
+            flowDst.put("table_id", tableId);
+            flowDst.put("priority", priority);
+
+            JSONObject matchDst = new JSONObject();
+            JSONObject ethTypeDst = new JSONObject();
+            ethTypeDst.put("type", 2048);
+            JSONObject ethMatchDst = new JSONObject();
+            ethMatchDst.put("ethernet-type", ethTypeDst);
+            matchDst.put("ethernet-match", ethMatchDst);
+            matchDst.put("ipv4-destination", ipCidr);
+            flowDst.put("match", matchDst);
+
+            flowDst.put("instructions", buildDropInstructions());
+
+            // send flow 2
+            sendFlowToOdl(switchId, tableId, flowIdDst, flowDst);
+        }
+
+        System.out.println("[ODL] Host/network isolated (direction=" + direction + "): " + ipCidr);
     }
 
     private static void performBlockMac(String mac) throws IOException {
@@ -311,23 +393,143 @@ public class OpenDaylightModule {
             System.out.println("⚠️  No target MAC provided for BLOCK_MAC");
             return;
         }
-        System.out.println("[ODL] (TODO) Blocking MAC via RESTCONF: " + mac);
-        // Example placeholder call; replace with real ODL RESTCONF flow programming
-        // sendOdlRequest("/restconf/operations/example:block-mac", "{...json body...}");
+
+        String switchId = ODL_DEFAULT_SWITCH_ID;
+        int tableId = ODL_DEFAULT_TABLE_ID;
+        int priority = ODL_DEFAULT_PRIORITY;
+
+        String safeMac = mac.replace(':', '-').toLowerCase();
+        String flowId = "block-mac-" + safeMac;
+
+        System.out.println("[ODL] Installing MAC-block flow: switch=" + switchId +
+                " table=" + tableId + " flowId=" + flowId + " mac=" + mac);
+
+        JSONObject flow = new JSONObject();
+        flow.put("id", flowId);
+        flow.put("table_id", tableId);
+        flow.put("priority", priority);
+
+        // Match: Ethernet source or destination MAC
+        JSONObject ethernetMatch = new JSONObject();
+        JSONObject ethernetType = new JSONObject();
+        ethernetType.put("type", 2048); // Primarily IPv4 traffic
+        ethernetMatch.put("ethernet-type", ethernetType);
+
+        JSONObject src = new JSONObject();
+        src.put("address", mac);
+        ethernetMatch.put("ethernet-source", src);
+
+        JSONObject dst = new JSONObject();
+        dst.put("address", mac);
+        ethernetMatch.put("ethernet-destination", dst);
+
+        JSONObject match = new JSONObject();
+        match.put("ethernet-match", ethernetMatch);
+        flow.put("match", match);
+
+        // Instructions: drop
+        flow.put("instructions", buildDropInstructions());
+
+        org.json.JSONArray flows = new org.json.JSONArray();
+        flows.put(flow);
+
+        JSONObject root = new JSONObject();
+        root.put("flow-node-inventory:flow", flows);
+
+        String path = "/restconf/config/opendaylight-inventory:nodes/node/"
+                + switchId + "/table/" + tableId + "/flow/" + flowId;
+
+        sendOdlRequest("PUT", path, root.toString());
+    }
+
+    private static JSONObject buildDropInstructions() {
+        JSONObject dropAction = new JSONObject();
+        dropAction.put("order", 0);
+        dropAction.put("drop-action", new JSONObject());
+
+        org.json.JSONArray actions = new org.json.JSONArray();
+        actions.put(dropAction);
+
+        JSONObject applyActions = new JSONObject();
+        applyActions.put("action", actions);
+
+        JSONObject instruction = new JSONObject();
+        instruction.put("order", 0);
+        instruction.put("apply-actions", applyActions);
+
+        org.json.JSONArray instructionList = new org.json.JSONArray();
+        instructionList.put(instruction);
+
+        JSONObject instructions = new JSONObject();
+        instructions.put("instruction", instructionList);
+
+        return instructions;
     }
 
     private static void performInstallFlowViaOdl(JSONObject params) throws IOException {
-        System.out.println("[ODL] (TODO) Installing flow via RESTCONF with params: " + params.toString());
-        // Example placeholder; in a real system, map params → ODL flow JSON and PUT to /restconf/config/...
-        // sendOdlRequest("/restconf/config/example:flow", params.toString());
+        String switchId = params.optString("switchId", ODL_DEFAULT_SWITCH_ID);
+        int tableId = params.optInt("tableId", ODL_DEFAULT_TABLE_ID);
+        int priority = params.optInt("priority", ODL_DEFAULT_PRIORITY);
+        String flowId = params.optString("flowId", "flow-" + UUID.randomUUID());
+
+        System.out.println("[ODL] Installing generic flow via RESTCONF: switch=" + switchId
+                + " table=" + tableId + " flowId=" + flowId + " params=" + params);
+
+        JSONObject flow = new JSONObject();
+        flow.put("id", flowId);
+        flow.put("table_id", tableId);
+        flow.put("priority", priority);
+
+        JSONObject match = params.optJSONObject("match");
+        if (match != null) {
+            flow.put("match", match);
+        }
+
+        org.json.JSONArray instructionsArray = params.optJSONArray("instructions");
+        if (instructionsArray != null) {
+            JSONObject instructions = new JSONObject();
+            instructions.put("instruction", instructionsArray);
+            flow.put("instructions", instructions);
+        }
+
+        // Optional timeouts
+        if (params.has("hardTimeout")) {
+            flow.put("hard-timeout", params.getInt("hardTimeout"));
+        }
+        if (params.has("idleTimeout")) {
+            flow.put("idle-timeout", params.getInt("idleTimeout"));
+        }
+
+        org.json.JSONArray flows = new org.json.JSONArray();
+        flows.put(flow);
+
+        JSONObject root = new JSONObject();
+        root.put("flow-node-inventory:flow", flows);
+
+        String path = "/restconf/config/opendaylight-inventory:nodes/node/"
+                + switchId + "/table/" + tableId + "/flow/" + flowId;
+
+        sendOdlRequest("PUT", path, root.toString());
     }
 
-    @SuppressWarnings("unused")
-    private static void sendOdlRequest(String path, String body) throws IOException {
+    private static void sendFlowToOdl(String switchId, int tableId, String flowId, JSONObject flow) throws IOException {
+        org.json.JSONArray flows = new org.json.JSONArray();
+        flows.put(flow);
+
+        JSONObject root = new JSONObject();
+        root.put("flow-node-inventory:flow", flows);
+
+        String path = "/restconf/config/opendaylight-inventory:nodes/node/"
+                + switchId + "/table/" + tableId + "/flow/" + flowId;
+
+        sendOdlRequest("PUT", path, root.toString());
+    }
+
+    private static void sendOdlRequest(String method, String path, String body) throws IOException {
         String urlStr = ODL_BASE_URL + path;
         URL url = new URL(urlStr);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
+        conn.setRequestMethod(method);
         conn.setRequestProperty("Content-Type", "application/json");
 
         String basicAuth = Base64.getEncoder().encodeToString((ODL_USERNAME + ":" + ODL_PASSWORD).getBytes(StandardCharsets.UTF_8));
@@ -339,8 +541,14 @@ public class OpenDaylightModule {
         }
 
         int code = conn.getResponseCode();
-        System.out.println("[ODL] RESTCONF call " + urlStr + " returned HTTP " + code);
+        System.out.println("[ODL] RESTCONF " + method + " " + urlStr + " returned HTTP " + code);
         conn.disconnect();
+    }
+
+    @SuppressWarnings("unused")
+    private static void sendOdlRequest(String path, String body) throws IOException {
+        // Backwards-compatible default to POST
+        sendOdlRequest("POST", path, body);
     }
 
     // ---------------------------------------------------------------------
@@ -442,6 +650,13 @@ public class OpenDaylightModule {
             ODL_BASE_URL = props.getProperty("odl.base_url", ODL_BASE_URL);
             ODL_USERNAME = props.getProperty("odl.username", ODL_USERNAME);
             ODL_PASSWORD = props.getProperty("odl.password", ODL_PASSWORD);
+
+            // Optional SDN defaults (node, table, priority)
+            ODL_DEFAULT_SWITCH_ID = props.getProperty("odl.default_switch_id", ODL_DEFAULT_SWITCH_ID);
+            ODL_DEFAULT_TABLE_ID = Integer.parseInt(
+                    props.getProperty("odl.default_table_id", String.valueOf(ODL_DEFAULT_TABLE_ID)));
+            ODL_DEFAULT_PRIORITY = Integer.parseInt(
+                    props.getProperty("odl.default_priority", String.valueOf(ODL_DEFAULT_PRIORITY)));
 
             MODULE_ID = props.getProperty("module.id", MODULE_ID);
             MODULE_NAME = props.getProperty("module.name", MODULE_NAME);

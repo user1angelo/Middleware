@@ -149,6 +149,16 @@ app.get('/api/modules/health', async (req, res) => {
   }
 });
 
+// Start a user-defined module (headful)
+app.post('/api/modules/:id/start', async (req, res) => {
+  try {
+    const result = await processManager.startUserModule(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ===== UDM Config Routes =====
 app.get('/api/udm-configs', async (req, res) => {
   try {

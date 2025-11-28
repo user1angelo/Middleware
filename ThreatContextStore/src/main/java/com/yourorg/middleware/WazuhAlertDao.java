@@ -31,7 +31,7 @@ public class WazuhAlertDao {
             }
 
             // Check duplicate
-            String checkSql = "SELECT 1 FROM wazuh_alerts WHERE event_id = ?";
+            String checkSql = "SELECT 1 FROM alerts WHERE event_id = ?";
             try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
                 checkStmt.setObject(1, eventId);
                 ResultSet rs = checkStmt.executeQuery();
@@ -41,7 +41,7 @@ public class WazuhAlertDao {
             }
 
             // Insert message
-            String insertSql = "INSERT INTO wazuh_alerts (event_id, message_type, timestamp, event_type, source_module, payload, response_count, response_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            String insertSql = "INSERT INTO alerts (event_id, message_type, timestamp, event_type, source_module, payload, response_count, response_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement stmt = conn.prepareStatement(insertSql)) {
                 stmt.setObject(1, eventId);
                 stmt.setString(2, message.optString("message_type", "alert"));
@@ -82,7 +82,7 @@ public class WazuhAlertDao {
         Class.forName("org.postgresql.Driver");
 
         try (java.sql.Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
-            String updateSql = "UPDATE wazuh_alerts SET response_count = ?, response_status = ? WHERE event_id = ?";
+            String updateSql = "UPDATE alerts SET response_count = ?, response_status = ? WHERE event_id = ?";
             try (PreparedStatement stmt = conn.prepareStatement(updateSql)) {
                 stmt.setInt(1, responseCount);
                 stmt.setString(2, status);
@@ -128,7 +128,7 @@ public class WazuhAlertDao {
      * Query alerts by severity (legacy method for backward compatibility)
      */
     public List<JSONObject> queryBySeverityList(String severity) throws Exception {
-        String sql = "SELECT * FROM wazuh_alerts WHERE message_type = 'alert' AND payload->>'severity' = ? ORDER BY timestamp DESC";
+        String sql = "SELECT * FROM alerts WHERE message_type = 'alert' AND payload->>'severity' = ? ORDER BY timestamp DESC";
         List<Object> params = new ArrayList<>();
         params.add(severity);
         return executeQuery(sql, params);
