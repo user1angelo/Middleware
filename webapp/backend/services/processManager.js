@@ -7,13 +7,6 @@ const fsSync = require('fs');
 const MIDDLEWARE_ROOT = process.env.MIDDLEWARE_ROOT || path.join(__dirname, '../../../');
 const UDM_ROOT = process.env.UDM_ROOT || path.join(MIDDLEWARE_ROOT, 'user-defined-modules');
 
-// Main class names for headful UDMs (used for best-effort stop)
-const HEADFUL_MAIN_CLASS_BY_KEY = {
-  suricataModule: 'com.nis1.thesis.udm.SuricataModule',
-  prtgModule: 'com.nis1.thesis.udm.PRTGModule',
-  opendaylightModule: 'com.nis1.thesis.udm.OpenDaylightModule'
-};
-
 const PROCESSES = {
   threatContextStore: {
     name: 'ThreatContextStore',
@@ -29,7 +22,9 @@ const PROCESSES = {
     name: 'ModuleRegistry',
     cwd: process.env.MODULE_REGISTRY_PATH,
     command: 'java',
-    args: ['-cp', 'out:lib/*', 'com.yourorg.registry.ModuleRegistryMain'],
+    // Include SDK classes and all UDM JARs on the classpath so SDK-based
+    // plugins like OpenDaylightModule are actually loadable at runtime.
+    args: ['-cp', 'out:lib/*:../nis-thesis-sdk/out:../user-defined-modules/*', 'com.yourorg.registry.ModuleRegistryMain'],
     process: null,
     status: 'stopped',
     logFile: null,
@@ -45,40 +40,6 @@ const PROCESSES = {
     logFile: null,
     requiresJavaLayout: true
   },
-  // User-Defined Modules (UDM) - always started in headful terminals
-  suricataModule: {
-    name: 'Suricata UDM',
-    cwd: UDM_ROOT,
-    command: 'java',
-    args: ['-cp', 'out:../ModuleRegistryLifecycleManager/lib/*', 'com.nis1.thesis.udm.SuricataModule'],
-    process: null,
-    status: 'stopped',
-    logFile: null,
-    requiresJavaLayout: false,
-    headful: true
-  },
-  prtgModule: {
-    name: 'PRTG UDM',
-    cwd: UDM_ROOT,
-    command: 'java',
-    args: ['-cp', 'out:../ModuleRegistryLifecycleManager/lib/*', 'com.nis1.thesis.udm.PRTGModule'],
-    process: null,
-    status: 'stopped',
-    logFile: null,
-    requiresJavaLayout: false,
-    headful: true
-  },
-  opendaylightModule: {
-    name: 'OpenDaylight UDM',
-    cwd: UDM_ROOT,
-    command: 'java',
-    args: ['-cp', 'out:../ModuleRegistryLifecycleManager/lib/*', 'com.nis1.thesis.udm.OpenDaylightModule'],
-    process: null,
-    status: 'stopped',
-    logFile: null,
-    requiresJavaLayout: false,
-    headful: true
-  }
 };
 
 let logService = null;
@@ -389,24 +350,8 @@ async function stopProcess(processKey) {
     throw new Error(`Unknown process: ${processKey}`);
   }
   
-  // Headful UDMs are launched in detached terminals and we don't track
-  // a child PID. Use a best-effort pkill based on the main class name.
+  // If there is no tracked child process, report not running.
   if (!proc.process) {
-    if (proc.headful) {
-      const mainClass = HEADFUL_MAIN_CLASS_BY_KEY[processKey];
-      if (!mainClass) {
-        return { success: false, message: `${proc.name} is not running` };
-      }
-
-      try {
-        spawnSync('pkill', ['-f', mainClass], { stdio: 'ignore' });
-        proc.status = 'stopped';
-        return { success: true, message: `${proc.name} stop signal sent` };
-      } catch (e) {
-        throw new Error(`Failed to stop ${proc.name}: ${e.message}`);
-      }
-    }
-
     return { success: false, message: `${proc.name} is not running` };
   }
   
@@ -455,78 +400,191 @@ async function stopAll() {
   await Promise.allSettled(promises);
 }
 
-// Run TCSTester (headful: open in a real terminal and let the user drive it)
+// Run TCSTester under dashboard control and always return logs, even on errors
 async function runTest() {
   const testerPath = process.env.TCS_TESTER_PATH;
 
+  // Configuration problems should be reported back to the UI but
+  // should not cause the HTTP request itself to fail.
   if (!testerPath) {
-    throw new Error('TCS_TESTER_PATH is not set in the backend environment.');
+    return {
+      success: false,
+      message: 'TCS_TESTER_PATH is not set in the backend environment.',
+      output: '',
+      logFile: null
+    };
   }
 
   // Ensure tester path exists
   try {
     const stat = await fs.stat(testerPath);
     if (!stat.isDirectory()) {
-      throw new Error(`TCSTester path is not a directory: ${testerPath}`);
+      return {
+        success: false,
+        message: `TCSTester path is not a directory: ${testerPath}`,
+        output: '',
+        logFile: null
+      };
     }
   } catch (e) {
-    throw new Error(`TCSTester path does not exist: ${testerPath}`);
-  }
-
-  const term = findTerminal();
-  if (!term) {
-    throw new Error('No supported terminal emulator found. Cannot start TCSTester in headful mode.');
-  }
-
-  const shellCmd = buildHeadfulCommand(testerPath, 'java', [
-    '-cp',
-    '.:../ThreatContextStore/lib/*',
-    'TCSTester'
-  ]);
-
-  const args = term.buildArgs('TCSTester', testerPath, shellCmd);
-
-  try {
-    const child = spawn(term.cmd, args, {
-      cwd: testerPath,
-      env: process.env,
-      detached: true,
-      stdio: 'ignore'
-    });
-    child.unref();
-
-    console.log(`Opened TCSTester in interactive terminal '${term.cmd}'`);
-
     return {
-      success: true,
-      message: 'Opened TCSTester in a separate terminal window. Use it interactively there.',
+      success: false,
+      message: `TCSTester path does not exist: ${testerPath}`,
       output: '',
       logFile: null
     };
-  } catch (error) {
-    throw new Error(`Failed to start TCSTester: ${error.message}`);
   }
+
+  // Ensure logs directory and target file
+  const logsDir = await ensureLogsDir();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const logFilePath = path.join(logsDir, `tcstester_${timestamp}.log`);
+
+  // Compile TCSTester before running, so recent changes are picked up
+  const compileCmd = `cd ${shellEscapeArg(testerPath)} && javac -cp "../ThreatContextStore/lib/*" TCSTester.java`;
+  const compileResult = spawnSync('bash', ['-lc', compileCmd], { encoding: 'utf8' });
+
+  if (compileResult.status !== 0) {
+    const stderr = compileResult.stderr || '';
+    const stdout = compileResult.stdout || '';
+    const msg = stderr || stdout || 'Unknown compilation error';
+
+    return {
+      success: false,
+      message: `Failed to compile TCSTester: ${msg.split('\n')[0]}`,
+      output: `${stdout}\n${stderr}`,
+      logFile: null
+    };
+  }
+
+  // Run TCSTester in non-interactive "dashboard" mode, capture all stdout/stderr
+  // into a buffer and into a log file, and always resolve with a result object
+  // that the frontend can display (even if the exit code is non-zero).
+  return await new Promise((resolve) => {
+    const logStream = fsSync.createWriteStream(logFilePath, { flags: 'a' });
+    let buffer = '';
+
+    const child = spawn('java', [
+      '-cp',
+      '.:../ThreatContextStore/lib/*',
+      'TCSTester',
+      'dashboard'
+    ], {
+      cwd: testerPath,
+      env: process.env
+    });
+
+    const handleOutput = (source, data) => {
+      const text = data.toString();
+      buffer += text;
+      logStream.write(text);
+
+      if (logService) {
+        logService.broadcastLog('tcstester', text);
+      } else {
+        console.error(`[tcstester] ERROR: logService is NULL - cannot broadcast ${source} logs!`);
+      }
+    };
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', (data) => handleOutput('stdout', data));
+    child.stderr.on('data', (data) => handleOutput('stderr', data));
+
+    child.on('error', (error) => {
+      logStream.end();
+
+      if (logService) {
+        logService.broadcastLog('tcstester', `\n[TCSTester process error: ${error.message}]\n`);
+      }
+
+      resolve({
+        success: false,
+        message: `Failed to start TCSTester: ${error.message}`,
+        output: buffer,
+        logFile: logFilePath
+      });
+    });
+
+    child.on('close', (code) => {
+      logStream.end();
+
+      if (logService) {
+        logService.broadcastLog('tcstester', `\n[TCSTester exited with code ${code}]\n`);
+      }
+
+      const success = code === 0;
+      const message = success
+        ? 'TCSTester completed successfully.'
+        : `TCSTester exited with code ${code}. Check the output and log file for details.`;
+
+      resolve({
+        success,
+        message,
+        output: buffer,
+        logFile: logFilePath
+      });
+    });
+  });
 }
 
-// Map filesystem/config module IDs to process keys in PROCESSES
-const UDM_CONFIG_TO_PROCESS_KEY = {
-  'suricata-module': 'suricataModule',
-  'prtg-module': 'prtgModule',
-  'opendaylight-module': 'opendaylightModule'
-};
-
-// Start a user-defined module in headful mode based on its config ID
-async function startUserModule(configId) {
-  const processKey = UDM_CONFIG_TO_PROCESS_KEY[configId];
-  if (!processKey) {
-    throw new Error(`Unknown user-defined module: ${configId}`);
+// Launch a headful terminal that runs an OpenDaylight module evidence demo
+async function runOpenDaylightDemo() {
+  const term = findTerminal();
+  if (!term) {
+    return {
+      success: false,
+      message: 'No supported terminal emulator found on the system.',
+    };
   }
 
-  // Always recompile user-defined modules before launching them so that
-  // any recent Java changes are picked up when starting from the web UI.
-  await compileUserDefinedModules();
+  const cwd = MIDDLEWARE_ROOT;
 
-  return startProcess(processKey);
+  const innerCmd = [
+    'echo "=== OpenDaylight Module Evidence Demo ===";',
+    'echo;',
+    'echo "This terminal is opened in the Middleware repository root.";',
+    'echo "Use it to run the exact commands that demonstrate:";',
+    'echo "  1) The OpenDaylightModule being loaded by the Module Registry";',
+    'echo "  2) A simulated ransomware mitigation command being sent (SendRansomwareAlert)";',
+    'echo "  3) The resulting log evidence in ModuleRegistry logs";',
+    'echo;',
+    'echo "Recommended steps:";',
+    'echo "  a) tail -f webapp/logs/moduleRegistry_*.log | grep OpenDaylightModule";',
+    'echo "  b) in another tab: cd ModuleRegistryLifecycleManager";',
+    'echo "     javac -cp \"lib/*\" SendRansomwareAlert.java";',
+    'echo "     java -cp \".:lib/*\" SendRansomwareAlert";',
+    'echo;',
+    'read -p "Press ENTER to drop into an interactive shell here..." _;',
+    'cd ' + shellEscapeArg(MIDDLEWARE_ROOT) + ';',
+    'bash'
+  ].join(' ');
+
+  const shellCmd = buildHeadfulCommand(cwd, 'bash', ['-lc', innerCmd]);
+  const args = term.buildArgs('OpenDaylight Module Demo', cwd, shellCmd);
+
+  try {
+    const child = spawn(term.cmd, args, {
+      cwd,
+      env: process.env,
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    console.log(`Started headful OpenDaylight demo in terminal '${term.cmd}'`);
+
+    return {
+      success: true,
+      message: 'OpenDaylight demo terminal launched. Check your desktop.',
+    };
+  } catch (error) {
+    console.error('Failed to start OpenDaylight demo terminal:', error);
+    return {
+      success: false,
+      message: `Failed to start OpenDaylight demo: ${error.message}`,
+    };
+  }
 }
 
 module.exports = {
@@ -536,5 +594,5 @@ module.exports = {
   getAllStatus,
   stopAll,
   runTest,
-  startUserModule
+  runOpenDaylightDemo
 };

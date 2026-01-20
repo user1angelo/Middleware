@@ -27,6 +27,7 @@ public class ModuleRegistryMain {
     private static CommandRoutingListener commandListener;
     private static HealthMonitor healthMonitor;
     private static ExecutorService executorService;
+    private static SdkModuleHost sdkModuleHost;
     
     public static void main(String[] args) {
         printBanner();
@@ -35,9 +36,14 @@ public class ModuleRegistryMain {
         System.out.println("\n🔧 Initializing ModuleRegistry...");
         registry = new ModuleRegistry();
         
-        // Load existing modules from database
+        // Load existing modules from database (and scan filesystem/JARs)
         System.out.println("📂 Loading modules from database...");
         registry.loadModulesFromDatabase();
+        
+        // Initialize SDK-based pluggable modules (e.g., OpenDaylightModule)
+        System.out.println("\n🔌 Initializing SDK-based modules from classpath...");
+        sdkModuleHost = new SdkModuleHost();
+        sdkModuleHost.initializeModules();
         
         // Create component instances
         System.out.println("\n🚀 Starting components...\n");
@@ -114,6 +120,12 @@ public class ModuleRegistryMain {
         if (healthMonitor != null) {
             healthMonitor.stop();
             System.out.println("  ✓ HealthMonitor stopped");
+        }
+        
+        // Shut down SDK-based modules
+        if (sdkModuleHost != null) {
+            sdkModuleHost.shutdownModules();
+            System.out.println("  ✓ SDK-based modules shutdown complete");
         }
         
         // Shutdown executor service

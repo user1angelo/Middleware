@@ -334,20 +334,23 @@ public class ModuleRegistry {
         }
     }
     
-    /**
+/**
      * Scan the filesystem-based user-defined-modules directory and ensure
-     * there is at least a placeholder record for each module config found.
+     * there is at least a placeholder record for each discovered JAR plugin.
      *
-     * Convention:
+     * Conventions:
      *   - modules.root (from ConfigLoader) points at the root directory, e.g.
      *       ../user-defined-modules
-     *   - Under that, a `config/` folder contains one or more `*.properties`
-     *     files, where the filename (without extension) is treated as
-     *     `module_id`.
+     *   - The root itself contains one or more `*.jar` plugin files; the
+     *     base filename (without .jar) is treated as `module_id`.
+     *   - Optionally, a matching config file may exist under
+     *       config/<module_id>.properties
      *
      * This does NOT start any processes. It only ensures that a basic
      * registered_modules row exists so the dashboard can see that the
-     * module is known, even before it has sent a registration message.
+     * module is known, even before it has sent a registration message or
+     * heartbeats. The set of JARs under modules.root is the source of truth
+     * for which module IDs exist.
      */
     public void scanModulesFromFilesystem() {
         String root = ConfigLoader.getModulesRoot();
@@ -357,62 +360,66 @@ public class ModuleRegistry {
             return;
         }
 
-        java.io.File configDir = new java.io.File(rootDir, "config");
-        if (!configDir.exists() || !configDir.isDirectory()) {
-            System.out.println("ℹ️  No config/ directory under modules.root: " + configDir.getAbsolutePath());
-            return;
-        }
-
-        java.io.File[] files = configDir.listFiles((dir, name) -> name.endsWith(".properties"));
-        if (files == null || files.length == 0) {
-            System.out.println("ℹ️  No *.properties files found under " + configDir.getAbsolutePath());
-            return;
-        }
-
         int created = 0;
-        for (java.io.File f : files) {
-            String filename = f.getName();
-            String moduleId = filename.replaceFirst("\\.properties$", "");
 
-            // Skip if already in memory (from DB or runtime registration)
-            if (modules.containsKey(moduleId)) {
-                continue;
+        java.io.File configDir = new java.io.File(rootDir, "config");
+
+        // Discover modules via *.jar plugin files under modules.root
+        java.io.File[] jarFiles = rootDir.listFiles((dir, name) -> name.endsWith(".jar"));
+        if (jarFiles != null && jarFiles.length > 0) {
+            for (java.io.File jar : jarFiles) {
+                String filename = jar.getName();
+                String moduleId = filename.replaceFirst("\\.jar$", "");
+
+                // Skip if already in memory (from DB or runtime registration)
+                if (modules.containsKey(moduleId)) {
+                    continue;
+                }
+
+                try {
+                    System.out.println("🧩 Found JAR plugin: " + filename + " (module_id=" + moduleId + ")");
+
+                    JSONArray capabilities = new JSONArray();
+                    JSONObject metadata = new JSONObject();
+                    metadata.put("source", "jar");
+                    metadata.put("jar_path", jar.getAbsolutePath());
+
+                    // Attach config path if a matching properties file exists
+                    if (configDir.exists() && configDir.isDirectory()) {
+                        java.io.File cfg = new java.io.File(configDir, moduleId + ".properties");
+                        if (cfg.exists() && cfg.isFile()) {
+                            metadata.put("config_path", cfg.getAbsolutePath());
+                        }
+                    }
+
+                    Timestamp now = getCurrentManilaTimestamp();
+                    RegisteredModule module = new RegisteredModule(
+                        moduleId,
+                        moduleId,               // use id as name by default
+                        "generic_udm",         // generic type (can be refined later)
+                        capabilities,
+                        moduleId + "_commands_queue", // default command queue naming convention
+                        now,
+                        "offline",             // until registration/heartbeat
+                        metadata
+                    );
+
+                    modules.put(moduleId, module);
+                    saveModuleToDatabase(module);
+                    created++;
+
+                } catch (Exception e) {
+                    System.err.println("❌ Failed to create placeholder for JAR plugin " + filename + ": " + e.getMessage());
+                }
             }
-
-            try {
-                System.out.println("🧩 Found filesystem module config: " + filename + " (module_id=" + moduleId + ")");
-
-                // Create a very minimal placeholder module entry
-                JSONArray capabilities = new JSONArray();
-                JSONObject metadata = new JSONObject();
-                metadata.put("source", "filesystem");
-                metadata.put("config_path", f.getAbsolutePath());
-
-                Timestamp now = getCurrentManilaTimestamp();
-                RegisteredModule module = new RegisteredModule(
-                    moduleId,
-                    moduleId,               // use id as name by default
-                    "generic_udm",         // generic type
-                    capabilities,
-                    moduleId + "_commands_queue", // default command queue naming convention
-                    now,
-                    "offline",             // until a real heartbeat/registration arrives
-                    metadata
-                );
-
-                modules.put(moduleId, module);
-                saveModuleToDatabase(module);
-                created++;
-
-            } catch (Exception e) {
-                System.err.println("❌ Failed to create placeholder for module config " + filename + ": " + e.getMessage());
-            }
+        } else {
+            System.out.println("ℹ️  No *.jar plugin files found under " + rootDir.getAbsolutePath());
         }
 
         if (created > 0) {
-            System.out.println("📁 Registered " + created + " filesystem modules from " + configDir.getAbsolutePath());
+            System.out.println("📁 Registered or updated " + created + " JAR modules from " + rootDir.getAbsolutePath());
         } else {
-            System.out.println("ℹ️  No new filesystem modules to register (all already known).");
+            System.out.println("ℹ️  No new JAR modules to register (all already known).");
         }
     }
 

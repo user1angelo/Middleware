@@ -1,0 +1,19 @@
+# OpenDaylightModule configuration
+
+# RabbitMQ / Message Bus
+rabbitmq.host=localhost
+rabbitmq.port=5672
+rabbitmq.user=user
+rabbitmq.password=password
+rabbitmq.workflow_queue=workflow_queue
+rabbitmq.command_queue=odl_commands_queue
+
+# OpenDaylight RESTCONF
+odl.base_url=http://opendaylight:8181
+odl.username=admin
+odl.password=admin
+
+# Module identity
+module.id=odl_sdn_01
+module.name=OpenDaylight SDN Module
+module.type=sdn_controller

@@ -1,0 +1,25 @@
+# SuricataModule configuration
+
+# RabbitMQ / Message Bus
+rabbitmq.host=localhost
+rabbitmq.port=5672
+rabbitmq.user=user
+rabbitmq.password=password
+rabbitmq.workflow_queue=workflow_queue
+
+# Suricata eve.json configuration
+suricata.eve_json_path=/var/log/suricata/eve.json
+
+# Module identity
+# IMPORTANT: module.id must match the config filename (without .properties)
+# so the web dashboard can correlate DB records with this config.
+module.id=suricata-module
+module.name=Suricata UDM
+module.type=network_security
+module.command_queue=suricata-module_commands_queue
+
+# Module capabilities (used for workflow routing)
+module.capabilities=network_ids,alert_generation,packet_analysis,threat_detection
+
+# Heartbeat configuration (in seconds)
+module.heartbeat_interval=30

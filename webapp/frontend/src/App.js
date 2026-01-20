@@ -22,8 +22,8 @@ function App() {
           <Route path="/workflows" element={<Workflows />} />
           <Route path="/config" element={<Configuration />} />
           <Route path="/modules" element={<Modules />} />
+          <Route path="/test" element={<Testing />} />
           <Route path="/sdk/*" element={<SdkDocs />} />
-          <Route path="/logs" element={<Logs />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

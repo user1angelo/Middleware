@@ -4,8 +4,6 @@ import { moduleAPI } from '../services/api';
 const Modules = () => {
   const [modules, setModules] = useState([]);
   const [stats, setStats] = useState({ total: 0, online: 0, offline: 0 });
-  const [loading, setLoading] = useState({});
-  const [message, setMessage] = useState(null);
   
   const loadModules = async () => {
     try {
@@ -27,23 +25,6 @@ const Modules = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleStart = async (module) => {
-    const id = module.config_id || module.module_id;
-    if (!id) return;
-
-    setLoading(prev => ({ ...prev, [id]: true }));
-    setMessage(null);
-
-    try {
-      const res = await moduleAPI.start(id);
-      setMessage({ type: 'success', text: res.data.message });
-    } catch (error) {
-      setMessage({ type: 'error', text: error.response?.data?.error || error.message });
-    }
-
-    setLoading(prev => ({ ...prev, [id]: false }));
-  };
-  
   return (
     <div>
       <div className="page-header">
@@ -51,11 +32,6 @@ const Modules = () => {
         <p className="page-subtitle">Health status of registered modules</p>
       </div>
       
-      {message && (
-        <div className={`alert alert-${message.type}`}>
-          {message.text}
-        </div>
-      )}
       
       <div className="grid grid-3">
         <div className="card">
@@ -87,14 +63,14 @@ const Modules = () => {
                 <th>Status</th>
                 <th>Last Heartbeat</th>
                 <th>Capabilities</th>
-                <th>Actions</th>
+                <th>Source</th>
               </tr>
             </thead>
             <tbody>
               {modules.map(module => {
                 const id = module.config_id || module.module_id;
-                const isLoading = id && loading[id];
                 const isOnline = module.status === 'online';
+                const hasHealthyHeartbeat = Boolean(module.isHealthy);
 
                 return (
                   <tr key={module.module_id || id}>
@@ -107,6 +83,13 @@ const Modules = () => {
                       <span className={`status-badge status-${module.status}`}>
                         {module.status}
                       </span>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        {hasHealthyHeartbeat
+                          ? 'Active — JAR is sending heartbeats'
+                          : (isOnline
+                              ? 'Online but no recent heartbeat'
+                              : 'No heartbeat (offline)')}
+                      </div>
                     </td>
                     <td>
                       {module.last_heartbeat ? (
@@ -142,16 +125,17 @@ const Modules = () => {
                       )}
                     </td>
                     <td>
-                      {id ? (
-                        <button
-                          className="button button-success"
-                          onClick={() => handleStart(module)}
-                          disabled={isLoading || isOnline}
-                        >
-                          {isLoading ? <span className="spinner"></span> : 'Start'}
-                        </button>
+                      {module.metadata && (module.metadata.jar_path || module.metadata.config_path) ? (
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {module.metadata.jar_path && (
+                            <div>JAR: {module.metadata.jar_path.split(/[\\/]/).pop()}</div>
+                          )}
+                          {module.metadata.config_path && (
+                            <div>Config: {module.metadata.config_path.split(/[\\/]/).pop()}</div>
+                          )}
+                        </div>
                       ) : (
-                        <span style={{color: 'var(--text-muted)'}}>N/A</span>
+                        <span style={{color: 'var(--text-muted)'}}>Unknown</span>
                       )}
                     </td>
                   </tr>

@@ -74,6 +74,16 @@ app.post('/api/processes/test', async (req, res) => {
   }
 });
 
+// OpenDaylight Module demo: launches a headful terminal showing evidence
+app.post('/api/testing/opendaylight-demo', async (req, res) => {
+  try {
+    const result = await processManager.runOpenDaylightDemo();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ===== Configuration Routes =====
 app.get('/api/config/:program', async (req, res) => {
   try {
@@ -144,16 +154,6 @@ app.get('/api/modules/health', async (req, res) => {
   try {
     const modules = await moduleHealthService.getModuleHealth();
     res.json(modules);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Start a user-defined module (headful)
-app.post('/api/modules/:id/start', async (req, res) => {
-  try {
-    const result = await processManager.startUserModule(req.params.id);
-    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

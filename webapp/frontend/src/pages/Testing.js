@@ -4,7 +4,9 @@ import { processAPI } from '../services/api';
 const Testing = () => {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
-  
+  const [odlRunning, setOdlRunning] = useState(false);
+  const [odlResult, setOdlResult] = useState(null);
+
   const runTest = async () => {
     setRunning(true);
     setResult(null);
@@ -18,6 +20,21 @@ const Testing = () => {
       });
     }
     setRunning(false);
+  };
+
+  const runOdlDemo = async () => {
+    setOdlRunning(true);
+    setOdlResult(null);
+    try {
+      const res = await processAPI.runOdlDemo();
+      setOdlResult(res.data);
+    } catch (error) {
+      setOdlResult({
+        success: false,
+        message: error.response?.data?.error || error.message
+      });
+    }
+    setOdlRunning(false);
   };
   
   return (
@@ -68,6 +85,43 @@ const Testing = () => {
                 Full log saved to: {result.logFile}
               </p>
             )}
+          </div>
+        )}
+      </div>
+      
+      <div className="card" style={{ marginTop: '24px' }}>
+        <h3 className="card-title">OpenDaylight Module Demo</h3>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
+          Launches a headful terminal on the host that walks through an OpenDaylight
+          module demo, showing evidence of lifecycle, controller communication, and
+          execution of mitigation commands.
+        </p>
+
+        <button
+          className="button button-primary"
+          onClick={runOdlDemo}
+          disabled={odlRunning}
+        >
+          {odlRunning ? (
+            <>
+              <span className="spinner" style={{ marginRight: '8px' }}></span>
+              Launching Demo Terminal...
+            </>
+          ) : (
+            'Open OpenDaylight Demo Terminal'
+          )}
+        </button>
+
+        {odlResult && (
+          <div style={{ marginTop: '20px' }}>
+            <div className={`alert alert-${odlResult.success ? 'success' : 'error'}`}>
+              {odlResult.message}
+            </div>
+            <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+              After clicking this button, a new terminal window should appear on the
+              host machine. Use that window plus the Logs and Modules pages as
+              evidence that the OpenDaylight module is working.
+            </p>
           </div>
         )}
       </div>

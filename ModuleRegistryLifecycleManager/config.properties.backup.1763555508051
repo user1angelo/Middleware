@@ -1,0 +1,15 @@
+# Database Configuration
+db.host=192.168.137.1
+db.port=5432
+db.name=NIS1
+db.user=postgres
+db.password=user
+
+# RabbitMQ connection settings
+rabbitmq.host=192.168.137.185
+rabbitmq.port=5672
+rabbitmq.user=user
+rabbitmq.password=password
+rabbitmq.queue.name=alerts_queue
+rabbitmq.query_response_queue.name=query_response_queue
+

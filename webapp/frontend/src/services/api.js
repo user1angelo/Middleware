@@ -13,7 +13,8 @@ export const processAPI = {
   getStatus: () => api.get('/processes/status'),
   start: (name) => api.post(`/processes/${name}/start`),
   stop: (name) => api.post(`/processes/${name}/stop`),
-  runTest: () => api.post('/processes/test')
+  runTest: () => api.post('/processes/test'),
+  runOdlDemo: () => api.post('/testing/opendaylight-demo')
 };
 
 export const configAPI = {
@@ -36,8 +37,7 @@ export const workflowAPI = {
 };
 
 export const moduleAPI = {
-  getHealth: () => api.get('/modules/health'),
-  start: (id) => api.post(`/modules/${id}/start`)
+  getHealth: () => api.get('/modules/health')
 };
 
 export default api;

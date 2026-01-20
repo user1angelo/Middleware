@@ -62,7 +62,35 @@ public class TCSTester {
     public static void main(String[] args) {
         // Load any saved configuration from previous runs
         loadConfig();
-        runMainMenu();
+        
+        // If launched with an argument (e.g. from the web dashboard), run a
+        // non-interactive test mode that sends a fixed number of alerts and
+        // then exits. This avoids blocking on stdin when started by the
+        // backend.
+        if (args != null && args.length > 0 && "dashboard".equalsIgnoreCase(args[0])) {
+            runDashboardMode();
+        } else {
+            runMainMenu();
+        }
+    }
+
+    /**
+     * Non-interactive mode used by the web dashboard tester. Sends a fixed
+     * number of alerts and then exits, while printing progress and errors to
+     * stdout/stderr so the backend can capture them in logs.
+     */
+    private static void runDashboardMode() {
+        System.out.println("=== TCSTester Dashboard Mode ===");
+        System.out.println("Sending 10 random ransomware alerts to both queues...\n");
+
+        try {
+            // Reuse the core alert sending logic but without any prompts
+            sendRandomAlerts(10, false);
+            System.out.println("\n✅ Dashboard test completed. 10 alerts sent.");
+        } catch (Exception e) {
+            System.err.println("❌ Error while running dashboard test: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     /**

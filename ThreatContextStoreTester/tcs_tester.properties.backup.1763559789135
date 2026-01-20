@@ -1,0 +1,8 @@
+# TCSTester (ThreatContextStore Tester) configuration
+# RabbitMQ connection settings used by TCSTester
+rabbitmq.host=192.168.1.8
+rabbitmq.port=5672
+rabbitmq.user=user
+rabbitmq.password=password
+rabbitmq.alerts_queue=alerts_queue
+rabbitmq.workflow_queue=workflow_queue
