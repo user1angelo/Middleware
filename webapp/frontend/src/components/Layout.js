@@ -3,19 +3,18 @@ import { Link, useLocation } from 'react-router-dom';
 
 const Layout = ({ children }) => {
   const location = useLocation();
-
+  
   const navItems = [
     { path: '/', label: 'Home' },
     { path: '/control', label: 'Control Panel' },
     { path: '/modules', label: 'User-Defined Modules' },
-    { path: '/network', label: 'Network Control' },
     { path: '/sdk', label: 'SDK Docs' },
     { path: '/logs', label: 'Logs' },
     { path: '/workflows', label: 'Workflows' },
     { path: '/config', label: 'Configuration' },
     { path: '/test', label: 'Testing' }
   ];
-
+  
   return (
     <div className="layout">
       <aside className="sidebar">

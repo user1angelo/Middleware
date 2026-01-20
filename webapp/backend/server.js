@@ -12,7 +12,6 @@ const workflowService = require('./services/workflowService');
 const moduleHealthService = require('./services/moduleHealthService');
 const logService = require('./services/logService');
 const udmConfigService = require('./services/udmConfigService');
-const odlService = require('./services/odlService');
 
 const app = express();
 const server = http.createServer(app);
@@ -188,46 +187,17 @@ app.put('/api/udm-configs/:id', async (req, res) => {
   }
 });
 
-// ===== ODL Network Routes =====
-app.get('/api/odl/topology', async (req, res) => {
-  try {
-    const topology = await odlService.getTopology();
-    res.json(topology);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/odl/isolate', async (req, res) => {
-  try {
-    const { ip, mac } = req.body;
-    const result = await odlService.isolateHost(ip, mac);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/odl/scan', async (req, res) => {
-  try {
-    const result = await odlService.triggerNetworkScan();
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // ===== WebSocket Connection =====
 io.on('connection', (socket) => {
   console.log('✅ Client connected:', socket.id);
-
+  
   // Send a test message immediately
   socket.emit('process-log', {
     process: 'threatContextStore',
     message: '[Dashboard] WebSocket connection established\n',
     timestamp: new Date().toISOString()
   });
-
+  
   socket.on('disconnect', () => {
     console.log('❌ Client disconnected:', socket.id);
   });
