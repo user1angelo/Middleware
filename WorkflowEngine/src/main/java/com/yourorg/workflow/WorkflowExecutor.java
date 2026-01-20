@@ -4,6 +4,8 @@ import com.rabbitmq.client.Channel;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.IOException;
+
 import java.time.ZonedDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -17,29 +19,30 @@ import java.util.UUID;
  * For production, implement actual command execution and integrations.
  */
 public class WorkflowExecutor {
-    
+
     private static final String WORKFLOW_RESPONSE_QUEUE = ConfigLoader.getWorkflowResponseQueueName();
     private static final ZoneId MANILA_ZONE = ZoneId.of("Asia/Manila");
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
-    
+
     /**
      * Execute a workflow and send response to RabbitMQ
      */
     public void executeWorkflow(Workflow workflow, JSONObject alert, Channel channel) {
         System.out.println("\n✅ Executing Workflow: " + workflow.getName());
         System.out.println("   Version: " + workflow.getVersion());
-        
+
         JSONArray stepsExecuted = new JSONArray();
-        
+
         try {
             // Execute each step
             if (workflow.getSteps() != null) {
                 for (int i = 0; i < workflow.getSteps().size(); i++) {
                     Workflow.Step step = workflow.getSteps().get(i);
-                    System.out.println("\n   Step " + (i + 1) + "/" + workflow.getSteps().size() + ": " + step.getName());
-                    
+                    System.out
+                            .println("\n   Step " + (i + 1) + "/" + workflow.getSteps().size() + ": " + step.getName());
+
                     boolean success = executeStep(step, alert);
-                    
+
                     // Record step execution
                     JSONObject stepResult = new JSONObject();
                     stepResult.put("step_name", step.getName());
@@ -47,14 +50,14 @@ public class WorkflowExecutor {
                     stepsExecuted.put(stepResult);
                 }
             }
-            
+
             // Send workflow response
             sendWorkflowResponse(workflow, alert, stepsExecuted, "completed", channel);
             System.out.println("\n✅ Workflow completed: " + workflow.getName());
-            
+
         } catch (Exception e) {
             System.err.println("\n❌ Workflow failed: " + e.getMessage());
-            
+
             // Send failure response
             try {
                 sendWorkflowResponse(workflow, alert, stepsExecuted, "failed", channel);
@@ -63,7 +66,7 @@ public class WorkflowExecutor {
             }
         }
     }
-    
+
     /**
      * Execute a single workflow step (placeholder implementation)
      */
@@ -73,42 +76,89 @@ public class WorkflowExecutor {
                 System.out.println("      ⚠️  No action defined");
                 return false;
             }
-            
+
             Workflow.Action action = step.getAction();
             System.out.println("      Action Type: " + action.getType());
-            
+
             if (action.getEvent() == null) {
                 System.out.println("      ⚠️  No event defined");
                 return false;
             }
-            
+
             Workflow.Event event = action.getEvent();
             System.out.println("      Event Type: " + event.getType());
-            
+
             // Substitute template variables in event data
             if (event.getData() != null) {
                 System.out.println("      Event Data:");
                 for (Map.Entry<String, Object> entry : event.getData().entrySet()) {
                     String value = entry.getValue().toString();
-                    
+
                     // Substitute template variables
                     String substituted = substituteTemplateVariables(value, alert);
-                    
+
                     System.out.println("         " + entry.getKey() + ": " + substituted);
                 }
             }
-            
-            // Placeholder: Log that we would publish this event
-            System.out.println("      📤 [PLACEHOLDER] Would publish event: " + event.getType());
-            
+
+            // Construct command message
+            JSONObject command = new JSONObject();
+            command.put("message_type",
+                    "odl." + event.getType().replace("INITIATE_MITIGATION", "host.isolate").toLowerCase()); // Default
+                                                                                                            // mapping,
+                                                                                                            // customize
+                                                                                                            // as needed
+
+            // Allow explicit action to override message type
+            if (event.getData() != null && event.getData().containsKey("action")) {
+                String actionType = event.getData().get("action").toString();
+                if ("ISOLATE_VLAN".equals(actionType)) {
+                    command.put("message_type", "odl.host.isolate");
+                }
+            }
+
+            command.put("event_id", UUID.randomUUID().toString());
+            command.put("timestamp", ZonedDateTime.now(MANILA_ZONE).format(ISO_FORMATTER));
+            command.put("event_type", "workflow.command");
+            command.put("source_module", "WorkflowEngine");
+
+            // Build payload from event data
+            JSONObject payload = new JSONObject();
+            if (event.getData() != null) {
+                for (Map.Entry<String, Object> entry : event.getData().entrySet()) {
+                    String value = entry.getValue().toString();
+                    String substituted = substituteTemplateVariables(value, alert);
+
+                    // Map known fields to payload
+                    if (entry.getKey().equals("targetHost")) {
+                        payload.put("ip_address", substituted);
+                    } else if (entry.getKey().equals("hostId")) {
+                        payload.put("host_id", substituted);
+                    } else if (entry.getKey().equals("justification")) {
+                        payload.put("reason", substituted);
+                    } else {
+                        // Pass through other fields
+                        payload.put(entry.getKey(), substituted);
+                    }
+                }
+            }
+            command.put("payload", payload);
+
+            // Publish to RabbitMQ
+            String queueName = ConfigLoader.getWorkflowCommandQueueName();
+            channel.queueDeclare(queueName, true, false, false, null);
+            channel.basicPublish("", queueName, null, command.toString().getBytes("UTF-8"));
+
+            System.out.println("      📤 Published command to " + queueName + ": " + command.getString("message_type"));
+
             return true;
-            
+
         } catch (Exception e) {
             System.err.println("      ❌ Step failed: " + e.getMessage());
             return false;
         }
     }
-    
+
     /**
      * Substitute template variables with actual alert data
      * Example: "{{ trigger.payload.source_ip }}" → "192.168.1.101"
@@ -117,25 +167,26 @@ public class WorkflowExecutor {
         if (template == null || !template.contains("{{")) {
             return template;
         }
-        
+
         String result = template;
-        
+
         // Find all {{ }} patterns
         while (result.contains("{{")) {
             int start = result.indexOf("{{");
             int end = result.indexOf("}}", start);
-            
-            if (end == -1) break;
-            
+
+            if (end == -1)
+                break;
+
             String variable = result.substring(start + 2, end).trim();
             String value = extractVariableValue(variable, alert);
-            
+
             result = result.substring(0, start) + value + result.substring(end + 2);
         }
-        
+
         return result;
     }
-    
+
     /**
      * Extract value from alert based on variable path
      * Example: "trigger.payload.source_ip" → gets alert.payload.source_ip
@@ -146,10 +197,10 @@ public class WorkflowExecutor {
             if (variablePath.startsWith("trigger.")) {
                 variablePath = variablePath.substring(8);
             }
-            
+
             String[] parts = variablePath.split("\\.");
             Object current = alert;
-            
+
             for (String part : parts) {
                 if (current instanceof JSONObject) {
                     JSONObject obj = (JSONObject) current;
@@ -162,20 +213,20 @@ public class WorkflowExecutor {
                     return current.toString();
                 }
             }
-            
+
             return current.toString();
-            
+
         } catch (Exception e) {
             return "[ERROR: " + variablePath + "]";
         }
     }
-    
+
     /**
      * Send workflow response to RabbitMQ
      */
-    private void sendWorkflowResponse(Workflow workflow, JSONObject alert, JSONArray stepsExecuted, 
-                                      String status, Channel channel) throws Exception {
-        
+    private void sendWorkflowResponse(Workflow workflow, JSONObject alert, JSONArray stepsExecuted,
+            String status, Channel channel) throws Exception {
+
         JSONObject response = new JSONObject();
         response.put("message_type", "workflow_response");
         response.put("event_id", "workflow-" + UUID.randomUUID().toString());
@@ -185,11 +236,10 @@ public class WorkflowExecutor {
         response.put("status", status);
         response.put("steps_executed", stepsExecuted);
         response.put("timestamp", ZonedDateTime.now(MANILA_ZONE).format(ISO_FORMATTER));
-        
+
         // Send to workflow_response_queue
         channel.basicPublish("", WORKFLOW_RESPONSE_QUEUE, null, response.toString().getBytes("UTF-8"));
-        
+
         System.out.println("   📤 Sent workflow response to: " + WORKFLOW_RESPONSE_QUEUE);
     }
 }
-
