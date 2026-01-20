@@ -9,6 +9,7 @@ import Configuration from './pages/Configuration';
 import Modules from './pages/Modules';
 import Testing from './pages/Testing';
 import SdkDocs from './pages/SdkDocs';
+import NetworkControl from './pages/NetworkControl';
 import './App.css';
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
           <Route path="/workflows" element={<Workflows />} />
           <Route path="/config" element={<Configuration />} />
           <Route path="/modules" element={<Modules />} />
+          <Route path="/network" element={<NetworkControl />} />
           <Route path="/test" element={<Testing />} />
           <Route path="/sdk/*" element={<SdkDocs />} />
           <Route path="*" element={<Navigate to="/" replace />} />
