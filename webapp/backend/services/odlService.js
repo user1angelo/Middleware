@@ -11,7 +11,7 @@ const ODL_PASSWORD = process.env.ODL_PASSWORD || 'admin';
 const RABBITMQ_HOST = process.env.RABBITMQ_HOST || 'localhost';
 const RABBITMQ_PORT = process.env.RABBITMQ_PORT || 5672;
 const RABBITMQ_USER = process.env.RABBITMQ_USER || 'guest';
-const RABBITMQ_PASS = process.env.RABBITMQ_PASS || 'guest';
+const RABBITMQ_PASS = process.env.RABBITMQ_PASSWORD || 'guest';
 const COMMAND_QUEUE = 'workflow_command_queue';
 
 class OdlService {
