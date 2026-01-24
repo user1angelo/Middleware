@@ -40,11 +40,11 @@ public class ConfigLoader {
     }
 
     public static String getRabbitMqUser() {
-        return get("rabbitmq.user", "guest");
+        return get("rabbitmq.user", "user");
     }
 
     public static String getRabbitMqPassword() {
-        return get("rabbitmq.password", "guest");
+        return get("rabbitmq.password", "password");
     }
 
     public static String getWorkflowQueueName() {

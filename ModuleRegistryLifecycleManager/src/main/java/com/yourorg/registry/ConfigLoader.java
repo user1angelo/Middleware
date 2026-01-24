@@ -47,8 +47,8 @@ public class ConfigLoader {
         // RabbitMQ defaults
         properties.setProperty("rabbitmq.host", "127.0.0.1");
         properties.setProperty("rabbitmq.port", "5672");
-        properties.setProperty("rabbitmq.user", "guest");
-        properties.setProperty("rabbitmq.password", "guest");
+        properties.setProperty("rabbitmq.user", "user");
+        properties.setProperty("rabbitmq.password", "password");
 
         // Queue names
         properties.setProperty("rabbitmq.workflow_queue.name", "workflow_queue");
@@ -99,11 +99,11 @@ public class ConfigLoader {
     }
 
     public static String getRabbitMQUser() {
-        return properties.getProperty("rabbitmq.user", "guest");
+        return properties.getProperty("rabbitmq.user", "user");
     }
 
     public static String getRabbitMQPassword() {
-        return properties.getProperty("rabbitmq.password", "guest");
+        return properties.getProperty("rabbitmq.password", "password");
     }
 
     // Queue names
