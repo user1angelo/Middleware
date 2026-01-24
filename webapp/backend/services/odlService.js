@@ -32,6 +32,7 @@ class OdlService {
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 const url = `amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@${RABBITMQ_HOST}:${RABBITMQ_PORT}`;
+                console.log(`🔌 Connecting to RabbitMQ at ${RABBITMQ_HOST}:${RABBITMQ_PORT} as user '${RABBITMQ_USER}'...`);
                 this.connection = await amqp.connect(url);
                 this.channel = await this.connection.createChannel();
                 await this.channel.assertQueue(COMMAND_QUEUE, { durable: true });
