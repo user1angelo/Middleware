@@ -12,8 +12,8 @@ const ENABLE_RABBITMQ_LOG_TAP = (process.env.ENABLE_RABBITMQ_LOG_TAP || 'false')
 const ENABLE_RABBITMQ_STATS = (process.env.ENABLE_RABBITMQ_STATS || 'true').toLowerCase() !== 'false';
 const RABBITMQ_MGMT_HOST = process.env.RABBITMQ_MGMT_HOST || process.env.RABBITMQ_HOST || 'localhost';
 const RABBITMQ_MGMT_PORT = Number(process.env.RABBITMQ_MGMT_PORT || 15672);
-const RABBITMQ_MGMT_USER = process.env.RABBITMQ_MGMT_USER || process.env.RABBITMQ_USER || 'guest';
-const RABBITMQ_MGMT_PASSWORD = process.env.RABBITMQ_MGMT_PASSWORD || process.env.RABBITMQ_PASSWORD || 'guest';
+const RABBITMQ_MGMT_USER = process.env.RABBITMQ_MGMT_USER || process.env.RABBITMQ_USER || 'user';
+const RABBITMQ_MGMT_PASSWORD = process.env.RABBITMQ_MGMT_PASSWORD || process.env.RABBITMQ_PASSWORD || 'password';
 const RABBITMQ_VHOST = process.env.RABBITMQ_VHOST || '/';
 const RABBITMQ_STATS_INTERVAL_MS = Number(process.env.RABBITMQ_STATS_INTERVAL_MS || 3000);
 const RABBITMQ_MGMT_PROTOCOL = (process.env.RABBITMQ_MGMT_PROTOCOL || 'http').toLowerCase();

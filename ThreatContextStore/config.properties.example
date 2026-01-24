@@ -8,8 +8,8 @@ db.password=postgres
 # RabbitMQ Configuration
 rabbitmq.host=192.168.86.76
 rabbitmq.port=5672
-rabbitmq.user=guest
-rabbitmq.password=guest
+rabbitmq.user=user
+rabbitmq.password=password
 rabbitmq.queue.name=alerts_queue
 rabbitmq.query_response_queue.name=query_response_queue
 
