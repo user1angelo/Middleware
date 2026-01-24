@@ -66,11 +66,11 @@ public class ConfigLoader {
     }
 
     public static String getRabbitMqUser() {
-        return get("rabbitmq.user", "user");
+        return get("rabbitmq.user", "guest");
     }
 
     public static String getRabbitMqPassword() {
-        return get("rabbitmq.password", "password");
+        return get("rabbitmq.password", "guest");
     }
 
     public static String getRabbitMqQueueName() {

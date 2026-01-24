@@ -45,10 +45,10 @@ public class ConfigLoader {
         properties.setProperty("db.password", "postgres");
 
         // RabbitMQ defaults
-        properties.setProperty("rabbitmq.host", "192.168.86.76");
+        properties.setProperty("rabbitmq.host", "127.0.0.1");
         properties.setProperty("rabbitmq.port", "5672");
-        properties.setProperty("rabbitmq.user", "user");
-        properties.setProperty("rabbitmq.password", "password");
+        properties.setProperty("rabbitmq.user", "guest");
+        properties.setProperty("rabbitmq.password", "guest");
 
         // Queue names
         properties.setProperty("rabbitmq.workflow_queue.name", "workflow_queue");
@@ -91,7 +91,7 @@ public class ConfigLoader {
 
     // RabbitMQ configuration getters
     public static String getRabbitMQHost() {
-        return properties.getProperty("rabbitmq.host", "192.168.86.76");
+        return properties.getProperty("rabbitmq.host", "127.0.0.1");
     }
 
     public static int getRabbitMQPort() {
@@ -99,11 +99,11 @@ public class ConfigLoader {
     }
 
     public static String getRabbitMQUser() {
-        return properties.getProperty("rabbitmq.user", "user");
+        return properties.getProperty("rabbitmq.user", "guest");
     }
 
     public static String getRabbitMQPassword() {
-        return properties.getProperty("rabbitmq.password", "password");
+        return properties.getProperty("rabbitmq.password", "guest");
     }
 
     // Queue names

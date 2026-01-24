@@ -43,11 +43,11 @@ public class ConfigLoader {
     }
 
     public String getRabbitMQUser() {
-        return properties.getProperty("rabbitmq.user", "user");
+        return properties.getProperty("rabbitmq.user", "guest");
     }
 
     public String getRabbitMQPassword() {
-        return properties.getProperty("rabbitmq.password", "password");
+        return properties.getProperty("rabbitmq.password", "guest");
     }
 
     public String getWorkflowCommandQueue() {
