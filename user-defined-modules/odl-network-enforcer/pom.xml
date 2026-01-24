@@ -104,6 +104,16 @@
             </snapshots>
         </repository>
         <repository>
+            <id>opendaylight-release</id>
+            <url>https://nexus.opendaylight.org/content/repositories/opendaylight.release/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
             <id>opendaylight-snapshot</id>
             <url>https://nexus.opendaylight.org/content/repositories/opendaylight.snapshot/</url>
             <releases>

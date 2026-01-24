@@ -18,19 +18,64 @@ class OdlService {
     constructor() {
         this.connection = null;
         this.channel = null;
+        this.connecting = false;
         this.connectRabbitMQ();
     }
 
     async connectRabbitMQ() {
-        try {
-            const url = `amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@${RABBITMQ_HOST}:${RABBITMQ_PORT}`;
-            this.connection = await amqp.connect(url);
-            this.channel = await this.connection.createChannel();
-            await this.channel.assertQueue(COMMAND_QUEUE, { durable: true });
-            console.log('✅ OdlService connected to RabbitMQ');
-        } catch (error) {
-            console.error('❌ OdlService RabbitMQ connection error:', error.message);
-            // Retry logic could be added here
+        if (this.connecting) return;
+        this.connecting = true;
+
+        const maxRetries = 5;
+        const retryDelay = 2000; // 2 seconds
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const url = `amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@${RABBITMQ_HOST}:${RABBITMQ_PORT}`;
+                this.connection = await amqp.connect(url);
+                this.channel = await this.connection.createChannel();
+                await this.channel.assertQueue(COMMAND_QUEUE, { durable: true });
+                console.log('✅ OdlService connected to RabbitMQ');
+
+                // Handle connection close/error events
+                this.connection.on('close', () => {
+                    console.warn('⚠️ RabbitMQ connection closed, reconnecting...');
+                    this.channel = null;
+                    this.connection = null;
+                    this.connecting = false;
+                    setTimeout(() => this.connectRabbitMQ(), retryDelay);
+                });
+
+                this.connection.on('error', (err) => {
+                    console.error('❌ RabbitMQ connection error:', err.message);
+                });
+
+                this.connecting = false;
+                return;
+            } catch (error) {
+                console.error(`❌ OdlService RabbitMQ connection attempt ${attempt}/${maxRetries} failed:`, error.message);
+                if (attempt < maxRetries) {
+                    console.log(`⏳ Retrying in ${retryDelay / 1000} seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                }
+            }
+        }
+        this.connecting = false;
+        console.error('❌ Failed to connect to RabbitMQ after all retries');
+    }
+
+    // Wait for channel to be ready with timeout
+    async waitForChannel(timeoutMs = 5000) {
+        const startTime = Date.now();
+        while (!this.channel && (Date.now() - startTime) < timeoutMs) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (!this.channel) {
+            // Try to reconnect if not already connecting
+            if (!this.connecting) {
+                this.connectRabbitMQ();
+            }
+            throw new Error('RabbitMQ channel not ready. Please ensure RabbitMQ is running and try again.');
         }
     }
 
@@ -77,9 +122,7 @@ class OdlService {
 
     // Publish isolation command
     async isolateHost(ip, mac) {
-        if (!this.channel) {
-            throw new Error('RabbitMQ channel not ready');
-        }
+        await this.waitForChannel();
 
         const command = {
             message_type: 'odl.host.isolate',
@@ -101,9 +144,7 @@ class OdlService {
 
     // Publish topology discovery (scan) command
     async triggerNetworkScan() {
-        if (!this.channel) {
-            throw new Error('RabbitMQ channel not ready');
-        }
+        await this.waitForChannel();
 
         const command = {
             message_type: 'odl.topology.discover',
