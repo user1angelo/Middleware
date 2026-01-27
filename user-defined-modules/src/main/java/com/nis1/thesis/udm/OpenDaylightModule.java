@@ -7,6 +7,13 @@ import com.nis1.thesis.sdk.MitigationCommandData;
 import com.nis1.thesis.sdk.ModuleHelper;
 import com.nis1.thesis.sdk.PluggableModule;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.Properties;
@@ -142,7 +149,7 @@ public class OpenDaylightModule implements PluggableModule {
     }
 
     /**
-     * Stub: simulate an IP-based block/containment in OpenDaylight.
+     * Build a Flow payload for dropping traffic from the target host and send it to ODL.
      */
     private void simulateBlockIp(String targetHost, MitigationAction action) {
         if (targetHost == null || targetHost.isBlank()) {
@@ -150,14 +157,107 @@ public class OpenDaylightModule implements PluggableModule {
             return;
         }
 
-        String message = String.format(
-                "[STUB] Would call OpenDaylight RESTCONF at %s to apply %s for host %s (user=%s)",
-                odlBaseUrl,
-                action.getAction(),
-                targetHost,
-                odlUsername
-        );
-        helper.log(getName(), "INFO", message);
+        // Generic Flow ID derived from host
+        String flowId = "block-" + targetHost.replace(".", "-");
+        
+        // 1. Construct the JSON payload for an OpenFlow "drop" action.
+        // This schema matches generic ODL /restconf/config/opendaylight-inventory:nodes/node/{id}/table/{id}/flow/{id}
+        // Adjust fields if your ODL version uses a different model (e.g. Sodium/Magnesium+).
+        String jsonPayload = String.format(
+            "{\n" +
+            "  \"flow\": [\n" +
+            "    {\n" +
+            "      \"id\": \"%s\",\n" +
+            "      \"table_id\": 0,\n" +
+            "      \"priority\": 100,\n" +
+            "      \"hard-timeout\": 0,\n" +
+            "      \"idle-timeout\": 0,\n" +
+            "      \"match\": {\n" +
+            "        \"ipv4-source\": \"%s/32\",\n" +
+            "        \"ethernet-match\": {\n" +
+            "          \"ethernet-type\": {\n" +
+            "            \"type\": 2048\n" +
+            "          }\n" +
+            "        }\n" +
+            "      },\n" +
+            "      \"instructions\": {\n" +
+            "        \"instruction\": [\n" +
+            "          {\n" +
+            "            \"order\": 0,\n" +
+            "            \"apply-actions\": {\n" +
+            "              \"action\": [\n" +
+            "                {\n" +
+            "                  \"order\": 0,\n" +
+            "                  \"drop-action\": {}\n" +
+            "                }\n" +
+            "              ]\n" +
+            "            }\n" +
+            "          }\n" +
+            "        ]\n" +
+            "      }\n" +
+            "    }\n" +
+            "  ]\n" +
+            "}", flowId, targetHost);
+
+        // 2. Build the URL. We assume a single switch "openflow:1" for valid simplicity, 
+        // or we could iterate switches. For this stub->impl transition, we'll hardcode or config it later.
+        // Path: /restconf/config/opendaylight-inventory:nodes/node/openflow:1/table/0/flow/{flowId}
+        String nodeName = "openflow:1"; // default
+        String path = String.format("/restconf/config/opendaylight-inventory:nodes/node/%s/table/0/flow/%s", nodeName, flowId);
+
+        helper.log(getName(), "INFO", "Sending RESTCONF request to " + odlBaseUrl + path);
+        
+        // 3. Send Request
+        try {
+            sendRestconfRequest("PUT", path, jsonPayload);
+            helper.log(getName(), "INFO", "Successfully installed DROP flow for " + targetHost);
+        } catch (IOException e) {
+            helper.log(getName(), "ERROR", "Failed to send RESTCONF request: " + e.getMessage());
+            // Log the payload for debug
+             helper.log(getName(), "DEBUG", "Failed Payload: " + jsonPayload);
+        }
+    }
+
+    private void sendRestconfRequest(String method, String path, String jsonPayload) throws IOException {
+        String fullUrl = odlBaseUrl + path;
+        URL url = new URL(fullUrl);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+
+        // Auth
+        String auth = odlUsername + ":" + odlPassword;
+        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+        conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
+
+        // Headers
+        conn.setRequestMethod(method);
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setDoOutput(true);
+
+        // Write Body
+        if (jsonPayload != null) {
+            try (OutputStream os = conn.getOutputStream()) {
+                byte[] input = jsonPayload.getBytes(StandardCharsets.UTF_8);
+                os.write(input, 0, input.length);
+            }
+        }
+
+        // Read Response
+        int status = conn.getResponseCode();
+        if (status >= 200 && status < 300) {
+            // Success
+            return;
+        } else {
+            // Error - read stream
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getErrorStream(), StandardCharsets.UTF_8))) {
+                StringBuilder response = new StringBuilder();
+                String responseLine;
+                while ((responseLine = br.readLine()) != null) {
+                    response.append(responseLine.trim());
+                }
+                throw new IOException("HTTP " + status + ": " + response.toString());
+            }
+        }
     }
 
     /**
