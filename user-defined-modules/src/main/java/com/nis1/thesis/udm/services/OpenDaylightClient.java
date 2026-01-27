@@ -1,0 +1,132 @@
+package com.nis1.thesis.udm.services;
+
+import com.nis1.thesis.sdk.ModuleHelper;
+
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
+/**
+ * Service for interacting with OpenDaylight RESTCONF API.
+ */
+public class OpenDaylightClient {
+
+    private final ModuleHelper helper;
+    private final String moduleName;
+    private final String baseUrl;
+    private final String username;
+    private final String password;
+
+    // Default SDN settings
+    private static final String DEFAULT_NODE = "openflow:1";
+    private static final int DEFAULT_TABLE = 0;
+    private static final int ISOLATION_PRIORITY = 1000;
+
+    public OpenDaylightClient(ModuleHelper helper, String moduleName, String baseUrl, String username,
+            String password) {
+        this.helper = helper;
+        this.moduleName = moduleName;
+        this.baseUrl = baseUrl;
+        this.username = username;
+        this.password = password;
+    }
+
+    /**
+     * Isolate a host by installing a high-priority DROP flow.
+     *
+     * @param targetIp The IP to block
+     * @return true if successful
+     */
+    public boolean isolateHost(String targetIp) {
+        String flowId = "isolate-" + targetIp;
+        String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
+                baseUrl, DEFAULT_NODE, DEFAULT_TABLE, flowId);
+
+        String jsonPayload = buildIsolationFlowJson(flowId, targetIp);
+
+        return sendRestRequest("PUT", url, jsonPayload);
+    }
+
+    /**
+     * Remove isolation for a host.
+     */
+    public boolean removeIsolation(String targetIp) {
+        String flowId = "isolate-" + targetIp;
+        String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
+                baseUrl, DEFAULT_NODE, DEFAULT_TABLE, flowId);
+
+        return sendRestRequest("DELETE", url, null);
+    }
+
+    private boolean sendRestRequest(String method, String urlStr, String jsonBody) {
+        try {
+            URL url = new URL(urlStr);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod(method);
+
+            // Auth
+            String auth = username + ":" + password;
+            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+            conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
+
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Accept", "application/json");
+
+            if (jsonBody != null) {
+                conn.setDoOutput(true);
+                try (OutputStream os = conn.getOutputStream()) {
+                    byte[] input = jsonBody.getBytes(StandardCharsets.UTF_8);
+                    os.write(input, 0, input.length);
+                }
+            }
+
+            int responseCode = conn.getResponseCode();
+            helper.log(moduleName, "INFO", "ODL RESTCONF " + method + " to " + urlStr + " returned " + responseCode);
+
+            return responseCode >= 200 && responseCode < 300;
+
+        } catch (Exception e) {
+            helper.log(moduleName, "ERROR", "RESTCONF request failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private String buildIsolationFlowJson(String flowId, String ipAddress) {
+        // Construct JSON manually to avoid extra dependencies if possible,
+        // or usage of org.json if available in classpath
+        return "{\n" +
+                "  \"flow\": [\n" +
+                "    {\n" +
+                "      \"id\": \"" + flowId + "\",\n" +
+                "      \"table_id\": " + DEFAULT_TABLE + ",\n" +
+                "      \"priority\": " + ISOLATION_PRIORITY + ",\n" +
+                "      \"match\": {\n" +
+                "        \"ipv4-source\": \"" + ipAddress + "/32\",\n" +
+                "        \"ethernet-match\": {\n" +
+                "          \"ethernet-type\": {\n" +
+                "            \"type\": 2048\n" +
+                "          }\n" +
+                "        }\n" +
+                "      },\n" +
+                "      \"instructions\": {\n" +
+                "        \"instruction\": [\n" +
+                "          {\n" +
+                "            \"order\": 0,\n" +
+                "            \"apply-actions\": {\n" +
+                "              \"action\": [\n" +
+                "                {\n" +
+                "                  \"order\": 0,\n" +
+                "                  \"drop-action\": {}\n" +
+                "                }\n" +
+                "              ]\n" +
+                "            }\n" +
+                "          }\n" +
+                "        ]\n" +
+                "      }\n" +
+                "    }\n" +
+                "  ]\n" +
+                "}";
+    }
+}

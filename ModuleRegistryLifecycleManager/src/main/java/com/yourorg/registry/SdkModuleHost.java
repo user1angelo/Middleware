@@ -2,74 +2,170 @@ package com.yourorg.registry;
 
 import com.nis1.thesis.sdk.CoreSystemApi;
 import com.nis1.thesis.sdk.Event;
+import com.nis1.thesis.sdk.MitigationAction;
+import com.nis1.thesis.sdk.MitigationCommandData;
 import com.nis1.thesis.sdk.PluggableModule;
+import org.json.JSONObject;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
  * SdkModuleHost
  *
- * Lightweight host that initializes SDK-based pluggable modules which are
- * already present on the JVM classpath (e.g. user-defined-modules/*.jar).
- *
- * This is intentionally minimal: it provides a stub CoreSystemApi that logs
- * publish/subscribe activity so we have runtime evidence that modules like
- * OpenDaylightModule are actually being loaded and initialized. It does NOT
- * yet integrate with RabbitMQ or the JSON-based ModuleRegistry messaging
- * pipeline.
+ * Hosts SDK-based pluggable modules and bridges them to the ModuleRegistry
+ * event loop.
+ * 
+ * Upgraded from stub to real event dispatcher.
  */
 public class SdkModuleHost {
 
     private final Map<String, PluggableModule> activeModules = new HashMap<>();
+    private final RealCoreSystemApi api = new RealCoreSystemApi();
 
     /**
-     * Simple CoreSystemApi stub that just logs publish/subscribe calls.
+     * Real implementation of CoreSystemApi that manages subscriptions.
      */
-    private static class LoggingCoreSystemApi implements CoreSystemApi {
-        private final Map<String, Consumer<Event<?>>> listeners = new HashMap<>();
+    private static class RealCoreSystemApi implements CoreSystemApi {
+        // pattern -> list of listeners
+        private final Map<String, List<Consumer<Event<?>>>> listeners = new ConcurrentHashMap<>();
 
         @Override
         public void publishEvent(Event<?> event) {
-            System.out.println("[SdkModuleHost][CoreSystemApi] publishEvent type=" + event.getType()
-                    + " id=" + event.getId());
+            System.out.println("[SdkModuleHost] Module published event: " + event.getType());
+            // In a full implementation, this would route back to RabbitMQ/ModuleRegistry
+            // For now, we assume UDM -> System communication is mostly System -> UDM
+            // commands
         }
 
         @Override
         public void subscribeToEvent(String eventType, Consumer<Event<?>> listener) {
-            System.out.println("[SdkModuleHost][CoreSystemApi] subscribeToEvent pattern=" + eventType);
-            listeners.put(eventType, listener);
+            System.out.println("[SdkModuleHost] Module subscribed to: " + eventType);
+            listeners.computeIfAbsent(eventType, k -> Collections.synchronizedList(new ArrayList<>())).add(listener);
         }
 
-        public Map<String, Consumer<Event<?>>> getListeners() {
-            return listeners;
+        public void dispatchLocal(Event<?> event) {
+            // 1. Exact match
+            if (listeners.containsKey(event.getType())) {
+                for (Consumer<Event<?>> listener : listeners.get(event.getType())) {
+                    try {
+                        listener.accept(event);
+                    } catch (Exception e) {
+                        System.err.println(
+                                "[SdkModuleHost] Error in listener for " + event.getType() + ": " + e.getMessage());
+                    }
+                }
+            }
+
+            // 2. Wildcard match (e.g. "odl.*" matches "odl.host.isolate")
+            for (Map.Entry<String, List<Consumer<Event<?>>>> entry : listeners.entrySet()) {
+                String pattern = entry.getKey();
+                if (pattern.endsWith(".*")) {
+                    String prefix = pattern.substring(0, pattern.length() - 1); // "odl."
+                    if (event.getType().startsWith(prefix) && !pattern.equals(event.getType())) {
+                        for (Consumer<Event<?>> listener : entry.getValue()) {
+                            try {
+                                listener.accept(event);
+                            } catch (Exception e) {
+                                System.err.println("[SdkModuleHost] Error in wildcard listener: " + e.getMessage());
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     /**
-     * Initialize all SDK-based modules that we know about on the current
-     * classpath. For now this is explicitly wired to OpenDaylightModule so
-     * that we can prove opendaylight-module.jar is being loaded and run.
+     * Dispatch a raw JSON message from RabbitMQ to registered SDK modules.
      */
+    public void dispatch(JSONObject json) {
+        try {
+            String messageType = json.optString("message_type");
+            String eventType = mapMessageTypeToEventType(messageType);
+
+            if (eventType == null)
+                return; // Unknown or irrelevant message
+
+            Object payload = null;
+
+            // Deserialize based on event type
+            if ("INITIATE_MITIGATION".equals(eventType)) {
+                payload = parseMitigationCommand(json);
+            } else if ("ODL_TOPOLOGY_DISCOVER".equals(eventType)) {
+                payload = json; // Pass full JSON
+            } else if (eventType.startsWith("odl.")) {
+                payload = json;
+            }
+
+            if (payload != null) {
+                // Create SDK Event wrapper
+                Event<Object> event = new Event<>(
+                        UUID.randomUUID().toString(),
+                        Instant.now(),
+                        eventType,
+                        payload);
+
+                // Dispatch to listeners
+                api.dispatchLocal(event);
+            }
+
+        } catch (Exception e) {
+            System.err.println("[SdkModuleHost] Failed to dispatch message: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private String mapMessageTypeToEventType(String messageType) {
+        if ("odl.host.isolate".equals(messageType))
+            return "INITIATE_MITIGATION"; // Map workflow command to SDK event
+        if ("workflow.command".equals(messageType))
+            return "INITIATE_MITIGATION"; // Generic mitigation legacy
+        if ("odl.topology.discover".equals(messageType))
+            return "ODL_TOPOLOGY_DISCOVER";
+        if (messageType != null && messageType.startsWith("odl."))
+            return messageType.toUpperCase();
+        return null;
+    }
+
+    private MitigationCommandData parseMitigationCommand(JSONObject json) {
+        JSONObject payload = json.optJSONObject("payload");
+        if (payload == null)
+            return null;
+
+        String ip = payload.optString("ip_address", payload.optString("targetHost"));
+        String reason = payload.optString("reason", "Automated mitigation");
+
+        // Determine action
+        MitigationAction action = MitigationAction.BLOCK_IP; // Default
+        String msgType = json.optString("message_type");
+        if (msgType.contains("isolate"))
+            action = MitigationAction.ISOLATE_VLAN;
+
+        MitigationCommandData data = new MitigationCommandData(ip, action, reason);
+        data.setWorkflowInstanceId(json.optString("event_id"));
+
+        return data;
+    }
+
     public void initializeModules() {
-        LoggingCoreSystemApi api = new LoggingCoreSystemApi();
-
-        // NOTE: This relies on the opendaylight-module JAR and the SDK
-        // classes being present on the Java classpath when
-        // ModuleRegistryMain is started. The web backend has been updated
-        // to include ../nis-thesis-sdk/out and ../user-defined-modules/*
-        // on the -cp for the ModuleRegistry process.
+        // NOTE: wired to OpenDaylightModule for this implementation
         initializeSingleModule("com.nis1.thesis.udm.OpenDaylightModule", api);
-
-        System.out.println("[SdkModuleHost] Active SDK modules: " + activeModules.keySet());
     }
 
     private void initializeSingleModule(String className, CoreSystemApi api) {
         try {
             Class<?> clazz = Class.forName(className);
             if (!PluggableModule.class.isAssignableFrom(clazz)) {
-                System.out.println("[SdkModuleHost] Class " + className + " does not implement PluggableModule; skipping.");
+                System.out.println(
+                        "[SdkModuleHost] Class " + className + " does not implement PluggableModule; skipping.");
                 return;
             }
 
@@ -90,16 +186,14 @@ public class SdkModuleHost {
         }
     }
 
-    /**
-     * Gracefully shut down all SDK-based modules that were initialized.
-     */
     public void shutdownModules() {
         for (Map.Entry<String, PluggableModule> entry : activeModules.entrySet()) {
             try {
                 System.out.println("[SdkModuleHost] Shutting down module: " + entry.getKey());
                 entry.getValue().shutdown();
             } catch (Throwable t) {
-                System.err.println("[SdkModuleHost] Error during shutdown of " + entry.getKey() + ": " + t.getMessage());
+                System.err
+                        .println("[SdkModuleHost] Error during shutdown of " + entry.getKey() + ": " + t.getMessage());
             }
         }
         activeModules.clear();

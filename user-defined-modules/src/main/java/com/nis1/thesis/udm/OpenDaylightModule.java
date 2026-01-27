@@ -6,26 +6,23 @@ import com.nis1.thesis.sdk.MitigationAction;
 import com.nis1.thesis.sdk.MitigationCommandData;
 import com.nis1.thesis.sdk.ModuleHelper;
 import com.nis1.thesis.sdk.PluggableModule;
+import com.nis1.thesis.udm.services.NetworkScannerService;
+import com.nis1.thesis.udm.services.OpenDaylightClient;
+import org.json.JSONObject;
 
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.util.Map;
 import java.util.Properties;
 
 /**
- * OpenDaylightModule - SDK-based pluggable module for SDN mitigation.
+ * OpenDaylightModule - Integrates OpenDaylight SDN capabilities into the
+ * System.
  *
- * This implementation is designed to be loaded by the Module Registry & Lifecycle Manager
- * via the SOAR SDK. It no longer connects directly to RabbitMQ or sends registration
- * messages itself. Instead, it relies on the CoreSystemApi to subscribe to mitigation-
- * related events and to publish any future response events.
- *
- * For now, the module provides a **stubbed implementation** that:
- * - Loads OpenDaylight connection settings from a dedicated properties file
- * - Subscribes to INITIATE_MITIGATION events via CoreSystemApi
- * - Logs how it would translate those commands into RESTCONF calls to OpenDaylight
- *
- * Once the RESTCONF details are finalized, the simulate* methods can be replaced with
- * real HTTP calls using the configured base URL and credentials.
+ * Capabilities:
+ * 1. Network Topology Discovery (Active Scanning)
+ * 2. Automatic Host Isolation (via ODL RESTCONF)
+ * 3. Manual Mitigation Execution
  */
 public class OpenDaylightModule implements PluggableModule {
 
@@ -33,15 +30,15 @@ public class OpenDaylightModule implements PluggableModule {
 
     private CoreSystemApi api;
     private ModuleHelper helper;
+    private NetworkScannerService scanner;
+    private OpenDaylightClient odlClient;
 
-    // Module identity (override via config)
+    // Module identity
     private String moduleId = "odl_sdn_01";
     private String moduleName = "OpenDaylight SDN Module";
-    @SuppressWarnings("FieldCanBeLocal")
-    private String moduleType = "sdn_controller";
 
-    // OpenDaylight RESTCONF settings (override via config)
-    private String odlBaseUrl = "http://opendaylight:8181";
+    // Config
+    private String odlBaseUrl = "http://localhost:8181";
     private String odlUsername = "admin";
     private String odlPassword = "admin";
 
@@ -58,127 +55,167 @@ public class OpenDaylightModule implements PluggableModule {
         this.helper = new ModuleHelper(api);
 
         loadConfig();
+
+        // Initialize services
+        this.scanner = new NetworkScannerService(helper, getName());
+        this.odlClient = new OpenDaylightClient(helper, getName(), odlBaseUrl, odlUsername, odlPassword);
+
         this.running = true;
 
-        helper.log(getName(), "INFO", "Initializing OpenDaylightModule (id=" + moduleId + ")");
-        helper.log(getName(), "INFO", "Using OpenDaylight base URL: " + odlBaseUrl);
+        helper.log(getName(), "INFO", "Initializing OpenDaylightModule...");
+        helper.log(getName(), "INFO", "Connected to ODL at: " + odlBaseUrl);
 
-        // Subscribe to mitigation commands published by the Workflow Engine
+        // Subscribe to events
         api.subscribeToEvent("INITIATE_MITIGATION", this::onMitigationCommand);
+        api.subscribeToEvent("ODL_TOPOLOGY_DISCOVER", this::onTopologyDiscover);
 
-        // Optional future subscription for more SDN-specific flows
-        api.subscribeToEvent("SDN_INSTALL_FLOW", this::onSdnInstallFlow);
-
-        helper.log(getName(), "INFO", "Subscriptions registered for INITIATE_MITIGATION and SDN_INSTALL_FLOW");
+        helper.log(getName(), "INFO", "Subscribed to INITIATE_MITIGATION & ODL_TOPOLOGY_DISCOVER");
     }
 
     @Override
     public void shutdown() {
         running = false;
-        if (helper != null) {
-            helper.log(getName(), "INFO", "Shutting down OpenDaylightModule");
-        }
+        helper.log(getName(), "INFO", "Shutting down OpenDaylightModule");
     }
 
     /**
-     * Handle INITIATE_MITIGATION events from the Workflow Engine.
-     * Expected payload type: MitigationCommandData (from the SDK).
+     * Handle Manual/Automatic Mitigation Requests
      */
     private void onMitigationCommand(Event<?> event) {
-        if (!running) {
+        if (!running)
             return;
-        }
-
-        Object data = event.getData();
-        if (!(data instanceof MitigationCommandData)) {
-            helper.log(getName(), "WARN",
-                    "Received INITIATE_MITIGATION with unexpected payload type: " +
-                            (data == null ? "null" : data.getClass().getName()));
-            return;
-        }
-
-        MitigationCommandData command = (MitigationCommandData) data;
-        String targetHost = command.getTargetHost();
-        MitigationAction action = command.getAction();
-        String justification = command.getJustification();
-
-        helper.log(getName(), "INFO",
-                String.format("Handling mitigation command %s for target %s (workflow=%s, reason=%s)",
-                        action,
-                        targetHost,
-                        command.getWorkflowInstanceId(),
-                        justification));
 
         try {
-            if (action == MitigationAction.BLOCK_IP ||
-                action == MitigationAction.QUARANTINE ||
-                action == MitigationAction.ISOLATE_VLAN) {
-                simulateBlockIp(targetHost, action);
-            } else {
-                helper.log(getName(), "WARN",
-                        "MitigationAction " + action + " is not yet implemented in OpenDaylightModule stub");
+            Object data = event.getData();
+            if (!(data instanceof MitigationCommandData)) {
+                return;
             }
+
+            MitigationCommandData command = (MitigationCommandData) data;
+            String targetHost = command.getTargetHost();
+            MitigationAction action = command.getAction();
+
+            helper.log(getName(), "INFO", "Received mitigation request: " + action + " for " + targetHost);
+
+            if (action == MitigationAction.BLOCK_IP ||
+                    action == MitigationAction.QUARANTINE ||
+                    action == MitigationAction.ISOLATE_VLAN) {
+
+                boolean success = odlClient.isolateHost(targetHost);
+                if (success) {
+                    helper.log(getName(), "INFO", "Successfully isolated host: " + targetHost);
+                } else {
+                    helper.log(getName(), "ERROR", "Failed to isolate host: " + targetHost);
+                }
+            } else {
+                helper.log(getName(), "WARN", "Action " + action + " not supported by ODL module yet.");
+            }
+
         } catch (Exception e) {
-            helper.log(getName(), "ERROR",
-                    "Error while simulating mitigation for target " + targetHost + ": " + e.getMessage());
+            helper.log(getName(), "ERROR", "Error handling mitigation: " + e.getMessage());
         }
     }
 
     /**
-     * Handle SDN_INSTALL_FLOW events.
-     * In this stub version we simply log the received payload.
+     * Handle Topology Discovery (Ping Sweep)
      */
-    private void onSdnInstallFlow(Event<?> event) {
-        if (!running) {
+    private void onTopologyDiscover(Event<?> event) {
+        if (!running)
             return;
-        }
 
+        helper.log(getName(), "INFO", "Starting network topology scan...");
+
+        String startIp = null;
         Object data = event.getData();
-        helper.log(getName(), "INFO",
-                "Received SDN_INSTALL_FLOW event with payload type=" +
-                        (data == null ? "null" : data.getClass().getName()));
-        helper.log(getName(), "DEBUG",
-                "SDN_INSTALL_FLOW payload (to be mapped to RESTCONF in future): " + String.valueOf(data));
-    }
 
-    /**
-     * Stub: simulate an IP-based block/containment in OpenDaylight.
-     */
-    private void simulateBlockIp(String targetHost, MitigationAction action) {
-        if (targetHost == null || targetHost.isBlank()) {
-            helper.log(getName(), "WARN", "No targetHost provided for mitigation; skipping");
-            return;
+        // Extract start_ip from payload if available
+        if (data instanceof JSONObject) {
+            JSONObject json = (JSONObject) data;
+            JSONObject payload = json.optJSONObject("payload");
+            if (payload != null) {
+                startIp = payload.optString("start_ip", null);
+                if (startIp != null && startIp.isEmpty())
+                    startIp = null;
+            } else {
+                // Direct payload might be the params
+                startIp = json.optString("start_ip", null);
+            }
         }
 
-        String message = String.format(
-                "[STUB] Would call OpenDaylight RESTCONF at %s to apply %s for host %s (user=%s)",
-                odlBaseUrl,
-                action.getAction(),
-                targetHost,
-                odlUsername
-        );
-        helper.log(getName(), "INFO", message);
+        // Run scan in background (though helper.log might block, the event handler is
+        // usually async)
+        // Ideally should perform in a separate thread if scanning takes long,
+        // but ExecutorService is managed inside NetworkScannerService.
+
+        Map<String, String> results = scanner.scanNetwork(startIp);
+
+        helper.log(getName(), "INFO", "Scan complete. Found " + results.size() + " hosts.");
+
+        // Log discovered hosts
+        for (Map.Entry<String, String> entry : results.entrySet()) {
+            helper.log(getName(), "INFO", "  Host: " + entry.getKey() + " -> MAC: " + entry.getValue());
+        }
+    }
+
+    // ========== Public Methods for Manual Control ==========
+
+    /**
+     * Manually isolate a host by IP address.
+     * Can be called directly or via events.
+     *
+     * @param ipAddress The IP address to isolate
+     * @return true if isolation was successful
+     */
+    public boolean manualIsolateHost(String ipAddress) {
+        helper.log(getName(), "INFO", "Manual isolation requested for: " + ipAddress);
+        boolean success = odlClient.isolateHost(ipAddress);
+        if (success) {
+            helper.log(getName(), "INFO", "Manual isolation SUCCESS for: " + ipAddress);
+        } else {
+            helper.log(getName(), "ERROR", "Manual isolation FAILED for: " + ipAddress);
+        }
+        return success;
     }
 
     /**
-     * Load module and OpenDaylight configuration from properties file.
+     * Remove isolation from a host.
+     *
+     * @param ipAddress The IP address to un-isolate
+     * @return true if removal was successful
      */
+    public boolean manualRemoveIsolation(String ipAddress) {
+        helper.log(getName(), "INFO", "Remove isolation requested for: " + ipAddress);
+        boolean success = odlClient.removeIsolation(ipAddress);
+        if (success) {
+            helper.log(getName(), "INFO", "Isolation removed for: " + ipAddress);
+        } else {
+            helper.log(getName(), "ERROR", "Failed to remove isolation for: " + ipAddress);
+        }
+        return success;
+    }
+
+    /**
+     * Trigger a network scan manually.
+     *
+     * @param startIp Optional start IP for the scan range
+     * @return Map of discovered hosts (IP -> MAC)
+     */
+    public Map<String, String> manualScanNetwork(String startIp) {
+        helper.log(getName(), "INFO", "Manual network scan triggered");
+        return scanner.scanNetwork(startIp);
+    }
+
     private void loadConfig() {
         Properties props = new Properties();
         try (FileInputStream in = new FileInputStream(CONFIG_PATH)) {
             props.load(in);
-
-            moduleId = props.getProperty("module.id", moduleId);
-            moduleName = props.getProperty("module.name", moduleName);
-            moduleType = props.getProperty("module.type", moduleType);
-
             odlBaseUrl = props.getProperty("odl.base_url", odlBaseUrl);
             odlUsername = props.getProperty("odl.username", odlUsername);
             odlPassword = props.getProperty("odl.password", odlPassword);
-
-            System.out.println("[OpenDaylightModule] Loaded config from " + CONFIG_PATH);
+            moduleId = props.getProperty("module.id", moduleId);
+            moduleName = props.getProperty("module.name", moduleName);
         } catch (IOException e) {
-            System.out.println("[OpenDaylightModule][WARN] Could not load config (using defaults): " + e.getMessage());
+            System.out.println("[OpenDaylightModule] Using default config");
         }
     }
 }

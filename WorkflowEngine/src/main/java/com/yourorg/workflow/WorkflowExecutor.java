@@ -145,7 +145,7 @@ public class WorkflowExecutor {
             command.put("payload", payload);
 
             // Publish to RabbitMQ
-            String queueName = ConfigLoader.getWorkflowCommandQueueName();
+            String queueName = ConfigLoader.getWorkflowQueueName();
             channel.queueDeclare(queueName, true, false, false, null);
             channel.basicPublish("", queueName, null, command.toString().getBytes("UTF-8"));
 
