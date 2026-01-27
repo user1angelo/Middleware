@@ -12,7 +12,7 @@ const RABBITMQ_HOST = process.env.RABBITMQ_HOST || '127.0.0.1';
 const RABBITMQ_PORT = process.env.RABBITMQ_PORT || 5672;
 const RABBITMQ_USER = process.env.RABBITMQ_USER || 'user';
 const RABBITMQ_PASS = process.env.RABBITMQ_PASSWORD || 'password';
-const COMMAND_QUEUE = 'workflow_command_queue';
+const COMMAND_QUEUE = 'workflow_queue';
 
 class OdlService {
     constructor() {
