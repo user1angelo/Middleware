@@ -35,7 +35,7 @@ public class ConfigLoader {
 
     // RabbitMQ Configuration
     public String getRabbitMQHost() {
-        return properties.getProperty("rabbitmq.host", "192.168.86.76");
+        return properties.getProperty("rabbitmq.host", "127.0.0.1");
     }
 
     public int getRabbitMQPort() {
