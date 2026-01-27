@@ -1,0 +1,37 @@
+-classpath
+'/home/gerome/.m2/repository/com/google/code/gson/gson/2.13.1/gson-2.13.1.jar:/home/gerome/.m2/repository/com/google/errorprone/error_prone_annotations/2.38.0/error_prone_annotations-2.38.0.jar:/home/gerome/.m2/repository/com/rabbitmq/amqp-client/5.26.0/amqp-client-5.26.0.jar:/home/gerome/.m2/repository/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar:/home/gerome/.m2/repository/com/fatboyindustrial/gson-javatime-serialisers/gson-javatime-serialisers/1.1.2/gson-javatime-serialisers-1.1.2.jar:/home/gerome/.m2/repository/org/yaml/snakeyaml/2.0/snakeyaml-2.0.jar:/home/gerome/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.21.0/jackson-databind-2.21.0.jar:/home/gerome/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar:/home/gerome/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.21.0/jackson-core-2.21.0.jar'
+-encoding
+'UTF-8'
+-private
+-source
+'21'
+-sourcepath
+'/home/gerome/Downloads/Middleware/nis-thesis-sdk/src/main/java:/home/gerome/Downloads/Middleware/nis-thesis-sdk/target/generated-sources/annotations'
+-author
+-bottom
+'Copyright © 2026 SOAR Framework. All rights reserved.'
+-charset
+'UTF-8'
+-d
+'/home/gerome/Downloads/Middleware/nis-thesis-sdk/target/apidocs'
+-docencoding
+'UTF-8'
+-doctitle
+'SOAR Framework API Documentation'
+-footer
+'<b>SOAR Framework 1.0-SNAPSHOT</b>'
+-group
+'SDK - Core Interfaces and Data Models' 'com.nis1.thesis.sdk*'
+-group
+'Core - Framework Implementation' 'com.nis1.thesis.core*'
+-header
+'<b>SOAR Framework 1.0-SNAPSHOT</b>'
+-link
+'https://docs.oracle.com/en/java/javase/21/docs/api'
+-link
+'https://www.rabbitmq.com/client-libraries/java-api-guide'
+-nohelp
+-use
+-version
+-windowtitle
+'nis-thesis-sdk 1.0-SNAPSHOT API'
