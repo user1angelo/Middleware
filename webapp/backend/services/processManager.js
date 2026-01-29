@@ -45,13 +45,10 @@ const PROCESSES = {
 let logService = null;
 
 // Initialize with log service
-function setLogService(service) {
-  logService = service;
-}
-
-// Ensure logs directory exists
 async function ensureLogsDir() {
-  const logsDir = process.env.LOGS_DIR || path.join(__dirname, '../../logs');
+  const relativePath = process.env.LOGS_DIR || path.join(__dirname, '../../logs');
+  const logsDir = path.resolve(process.cwd(), relativePath);
+
   try {
     await fs.mkdir(logsDir, { recursive: true });
   } catch (error) {
@@ -165,11 +162,11 @@ function openTerminalForLog(title, cwd, logPath) {
 // Start a process
 async function startProcess(processKey) {
   const proc = PROCESSES[processKey];
-  
+
   if (!proc) {
     throw new Error(`Unknown process: ${processKey}`);
   }
-  
+
   if (proc.process) {
     return { success: false, message: `${proc.name} is already running` };
   }
@@ -243,38 +240,38 @@ async function startProcess(processKey) {
       throw new Error(`Failed to start ${proc.name}: ${error.message}`);
     }
   }
-  
+
   const logsDir = await ensureLogsDir();
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const logFilePath = path.join(logsDir, `${processKey}_${timestamp}.log`);
-  
+
   try {
     // Use sync write stream for logs
     const logStream = fsSync.createWriteStream(logFilePath, { flags: 'a' });
     proc.logFile = logFilePath;
-    
+
     const childProcess = spawn(proc.command, proc.args, {
       cwd: proc.cwd,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    
+
     proc.process = childProcess;
     proc.status = 'running';
-    
+
     console.log(`Started ${proc.name} with PID ${childProcess.pid}`);
 
     // Open a terminal window to live-tail the log
     openTerminalForLog(proc.name, proc.cwd, logFilePath);
-    
+
     // Handle stdout
     childProcess.stdout.setEncoding('utf8');
     childProcess.stdout.on('data', (data) => {
       const output = data.toString();
-      
+
       // Write to log file
       logStream.write(output);
-      
+
       // Stream to WebSocket
       console.log(`[${processKey}] stdout (${output.length} bytes):`, output.substring(0, 100).replace(/\n/g, ' '));
       if (logService) {
@@ -284,15 +281,15 @@ async function startProcess(processKey) {
         console.error(`[${processKey}] ERROR: logService is NULL - cannot broadcast logs!`);
       }
     });
-    
+
     // Handle stderr
     childProcess.stderr.setEncoding('utf8');
     childProcess.stderr.on('data', (data) => {
       const output = data.toString();
-      
+
       // Write to log file
       logStream.write(output);
-      
+
       // Stream to WebSocket
       console.log(`[${processKey}] stderr (${output.length} bytes):`, output.substring(0, 100).replace(/\n/g, ' '));
       if (logService) {
@@ -302,40 +299,40 @@ async function startProcess(processKey) {
         console.error(`[${processKey}] ERROR: logService is NULL - cannot broadcast logs!`);
       }
     });
-    
+
     // Handle process exit
     childProcess.on('close', (code) => {
       proc.process = null;
       proc.status = 'stopped';
       logStream.end();
-      
+
       if (logService) {
         logService.broadcastLog(processKey, `\n[Process exited with code ${code}]\n`);
       }
-      
+
       console.log(`${proc.name} exited with code ${code}`);
     });
-    
+
     // Handle errors
     childProcess.on('error', (error) => {
       proc.process = null;
       proc.status = 'error';
       logStream.end();
-      
+
       if (logService) {
         logService.broadcastLog(processKey, `\n[Process error: ${error.message}]\n`);
       }
-      
+
       console.error(`${proc.name} error:`, error);
     });
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       message: `${proc.name} started successfully`,
       logFile: logFilePath,
       pid: childProcess.pid
     };
-    
+
   } catch (error) {
     proc.status = 'error';
     throw new Error(`Failed to start ${proc.name}: ${error.message}`);
@@ -345,26 +342,26 @@ async function startProcess(processKey) {
 // Stop a process
 async function stopProcess(processKey) {
   const proc = PROCESSES[processKey];
-  
+
   if (!proc) {
     throw new Error(`Unknown process: ${processKey}`);
   }
-  
+
   // If there is no tracked child process, report not running.
   if (!proc.process) {
     return { success: false, message: `${proc.name} is not running` };
   }
-  
+
   try {
     proc.process.kill('SIGTERM');
-    
+
     // Force kill after 5 seconds if still running
     setTimeout(() => {
       if (proc.process) {
         proc.process.kill('SIGKILL');
       }
     }, 5000);
-    
+
     return { success: true, message: `${proc.name} stopped successfully` };
   } catch (error) {
     throw new Error(`Failed to stop ${proc.name}: ${error.message}`);
@@ -374,7 +371,7 @@ async function stopProcess(processKey) {
 // Get status of all processes
 function getAllStatus() {
   const status = {};
-  
+
   for (const [key, proc] of Object.entries(PROCESSES)) {
     status[key] = {
       name: proc.name,
@@ -383,20 +380,20 @@ function getAllStatus() {
       logFile: proc.logFile
     };
   }
-  
+
   return status;
 }
 
 // Stop all processes
 async function stopAll() {
   const promises = [];
-  
+
   for (const key of Object.keys(PROCESSES)) {
     if (PROCESSES[key].process) {
       promises.push(stopProcess(key));
     }
   }
-  
+
   await Promise.allSettled(promises);
 }
 
