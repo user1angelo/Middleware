@@ -12,7 +12,7 @@ const PROCESSES = {
     name: 'ThreatContextStore',
     cwd: process.env.THREAT_CONTEXT_STORE_PATH,
     command: 'java',
-    args: ['-cp', 'out:lib/*', 'com.yourorg.middleware.ThreatContextStoreMain'],
+    args: ['-cp', `out${path.delimiter}lib/*`, 'com.yourorg.middleware.ThreatContextStoreMain'],
     process: null,
     status: 'stopped',
     logFile: null,
@@ -24,7 +24,7 @@ const PROCESSES = {
     command: 'java',
     // Include SDK classes and all UDM JARs on the classpath so SDK-based
     // plugins like OpenDaylightModule are actually loadable at runtime.
-    args: ['-cp', 'out:lib/*:../nis-thesis-sdk/out:../user-defined-modules/*', 'com.yourorg.registry.ModuleRegistryMain'],
+    args: ['-cp', `out${path.delimiter}lib/*${path.delimiter}../nis-thesis-sdk/out${path.delimiter}../user-defined-modules/*`, 'com.yourorg.registry.ModuleRegistryMain'],
     process: null,
     status: 'stopped',
     logFile: null,
@@ -34,7 +34,7 @@ const PROCESSES = {
     name: 'WorkflowEngine',
     cwd: process.env.WORKFLOW_ENGINE_PATH,
     command: 'java',
-    args: ['-cp', 'out:lib/*', 'com.yourorg.workflow.WorkflowEngineMain'],
+    args: ['-cp', `out${path.delimiter}lib/*`, 'com.yourorg.workflow.WorkflowEngineMain'],
     process: null,
     status: 'stopped',
     logFile: null,
