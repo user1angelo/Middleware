@@ -67,6 +67,7 @@ public class OpenDaylightModule implements PluggableModule {
 
         // Subscribe to events
         api.subscribeToEvent("INITIATE_MITIGATION", this::onMitigationCommand);
+        api.subscribeToEvent("odl.topology.discover", this::onTopologyDiscover);
         api.subscribeToEvent("ODL_TOPOLOGY_DISCOVER", this::onTopologyDiscover);
 
         helper.log(getName(), "INFO", "Subscribed to INITIATE_MITIGATION & ODL_TOPOLOGY_DISCOVER");
