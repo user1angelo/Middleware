@@ -8,6 +8,8 @@ function NetworkControl() {
     const [selectedHost, setSelectedHost] = useState({ ip: '', mac: '' });
     const [isolateStatus, setIsolateStatus] = useState('');
     const [scanStatus, setScanStatus] = useState('');
+    const [startIp, setStartIp] = useState('');
+    const [isAutoScan, setIsAutoScan] = useState(false);
 
     const fetchTopology = async () => {
         // Silent loading for polling if we already have data
@@ -28,8 +30,17 @@ function NetworkControl() {
 
     const triggerScan = async () => {
         try {
-            setScanStatus('Auto-Scanning...');
-            await fetch('http://localhost:3001/api/odl/scan', { method: 'POST' });
+            setScanStatus(isAutoScan ? 'Auto-Scanning...' : 'Scanning...');
+
+            const body = {};
+            if (startIp) body.start_ip = startIp;
+
+            await fetch('http://localhost:3001/api/odl/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
             // Refresh topology shortly after triggering scan
             setTimeout(fetchTopology, 1000);
             setTimeout(() => setScanStatus(''), 3000);
@@ -67,22 +78,25 @@ function NetworkControl() {
     };
 
     useEffect(() => {
-        // 1. Trigger initial scan
-        triggerScan();
-        // 2. Initial fetch
+        // 1. Initial fetch
         fetchTopology();
 
-        // 3. Poll Topology every 5 seconds (Reads ODL state)
+        // 2. Poll Topology every 5 seconds (Reads ODL state)
         const topologyInterval = setInterval(fetchTopology, 5000);
 
-        // 4. Trigger Active Scan every 15 seconds (Forces ODL to ping/discovery)
-        const scanInterval = setInterval(triggerScan, 15000);
+        // 3. Auto-Scan logic
+        let scanInterval = null;
+        if (isAutoScan) {
+            // Trigger immediately when toggled on
+            triggerScan();
+            scanInterval = setInterval(triggerScan, 15000);
+        }
 
         return () => {
             clearInterval(topologyInterval);
-            clearInterval(scanInterval);
+            if (scanInterval) clearInterval(scanInterval);
         };
-    }, []);
+    }, [isAutoScan]); // Re-run effect when isAutoScan changes
 
     // Simple Topology Parser to extract hosts
     const getHosts = () => {
@@ -120,17 +134,41 @@ function NetworkControl() {
 
                 {/* Topology Section */}
                 <section className="card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
                         <h2>
                             🌐 Network Topology
-                            <span className="status-badge status-running" style={{ fontSize: '0.6em', verticalAlign: 'middle', marginLeft: '10px' }}>
-                                Continuous Scanning (15s)
-                            </span>
+                            {isAutoScan && (
+                                <span className="status-badge status-running" style={{ fontSize: '0.6em', verticalAlign: 'middle', marginLeft: '10px' }}>
+                                    Auto-Scanning (15s)
+                                </span>
+                            )}
                         </h2>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                            {scanStatus && <span style={{ fontSize: '0.9em', color: '#48bb78', fontStyle: 'italic' }}>{scanStatus}</span>}
+
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#333', padding: '10px', borderRadius: '8px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <label style={{ fontSize: '0.8em', color: '#aaa', marginBottom: '2px' }}>Start IP (Optional):</label>
+                                <input
+                                    type="text"
+                                    value={startIp}
+                                    onChange={(e) => setStartIp(e.target.value)}
+                                    placeholder="e.g. 192.168.1.1"
+                                    style={{ padding: '5px', borderRadius: '4px', border: '1px solid #555', background: '#222', color: 'white', width: '120px' }}
+                                />
+                            </div>
+
+                            <div style={{ borderLeft: '1px solid #555', height: '30px', margin: '0 5px' }}></div>
+
+                            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '5px', fontSize: '0.9em' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={isAutoScan}
+                                    onChange={(e) => setIsAutoScan(e.target.checked)}
+                                />
+                                Auto Scan
+                            </label>
+
                             <button onClick={() => { triggerScan(); }} disabled={loading} className="btn-primary">
-                                Force Scan Now
+                                Scan Once
                             </button>
                         </div>
                     </div>

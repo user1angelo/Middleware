@@ -4,13 +4,22 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 
 // Root paths for middleware and user-defined modules
-const MIDDLEWARE_ROOT = process.env.MIDDLEWARE_ROOT || path.join(__dirname, '../../../');
-const UDM_ROOT = process.env.UDM_ROOT || path.join(MIDDLEWARE_ROOT, 'user-defined-modules');
+// Resolve reliably relative to this file: webapp/backend/services/processManager.js
+const BACKEND_ROOT = path.resolve(__dirname, '..');
+const MIDDLEWARE_ROOT = process.env.MIDDLEWARE_ROOT
+  ? path.resolve(BACKEND_ROOT, process.env.MIDDLEWARE_ROOT)
+  : path.resolve(__dirname, '../../../../');
+
+const UDM_ROOT = process.env.UDM_ROOT
+  ? path.resolve(BACKEND_ROOT, process.env.UDM_ROOT)
+  : path.join(MIDDLEWARE_ROOT, 'user-defined-modules');
 
 const PROCESSES = {
   threatContextStore: {
     name: 'ThreatContextStore',
-    cwd: process.env.THREAT_CONTEXT_STORE_PATH,
+    cwd: process.env.THREAT_CONTEXT_STORE_PATH
+      ? path.resolve(BACKEND_ROOT, process.env.THREAT_CONTEXT_STORE_PATH)
+      : path.join(MIDDLEWARE_ROOT, 'ThreatContextStore'),
     command: 'java',
     args: ['-cp', `out${path.delimiter}lib/*`, 'com.yourorg.middleware.ThreatContextStoreMain'],
     process: null,
@@ -20,11 +29,13 @@ const PROCESSES = {
   },
   moduleRegistry: {
     name: 'ModuleRegistry',
-    cwd: process.env.MODULE_REGISTRY_PATH,
+    cwd: process.env.MODULE_REGISTRY_PATH
+      ? path.resolve(BACKEND_ROOT, process.env.MODULE_REGISTRY_PATH)
+      : path.join(MIDDLEWARE_ROOT, 'ModuleRegistryLifecycleManager'),
     command: 'java',
     // Include SDK classes and all UDM JARs on the classpath so SDK-based
     // plugins like OpenDaylightModule are actually loadable at runtime.
-    args: ['-cp', `out${path.delimiter}lib/*${path.delimiter}../nis-thesis-sdk/out${path.delimiter}../user-defined-modules/*`, 'com.yourorg.registry.ModuleRegistryMain'],
+    args: ['-cp', `out${path.delimiter}lib/*${path.delimiter}../nis-thesis-sdk/out${path.delimiter}${path.join(UDM_ROOT, 'out')}${path.delimiter}${path.join(UDM_ROOT, '*')}`, 'com.yourorg.registry.ModuleRegistryMain'],
     process: null,
     status: 'stopped',
     logFile: null,
@@ -32,7 +43,9 @@ const PROCESSES = {
   },
   workflowEngine: {
     name: 'WorkflowEngine',
-    cwd: process.env.WORKFLOW_ENGINE_PATH,
+    cwd: process.env.WORKFLOW_ENGINE_PATH
+      ? path.resolve(BACKEND_ROOT, process.env.WORKFLOW_ENGINE_PATH)
+      : path.join(MIDDLEWARE_ROOT, 'WorkflowEngine'),
     command: 'java',
     args: ['-cp', `out${path.delimiter}lib/*`, 'com.yourorg.workflow.WorkflowEngineMain'],
     process: null,
@@ -45,6 +58,11 @@ const PROCESSES = {
 let logService = null;
 
 // Initialize with log service
+function setLogService(service) {
+  logService = service;
+}
+
+// Ensure logs directory exists
 async function ensureLogsDir() {
   const relativePath = process.env.LOGS_DIR || path.join(__dirname, '../../logs');
   const logsDir = path.resolve(process.cwd(), relativePath);

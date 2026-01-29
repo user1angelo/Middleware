@@ -210,7 +210,8 @@ app.post('/api/odl/isolate', async (req, res) => {
 
 app.post('/api/odl/scan', async (req, res) => {
   try {
-    const result = await odlService.triggerNetworkScan();
+    const { start_ip } = req.body;
+    const result = await odlService.triggerNetworkScan(start_ip);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

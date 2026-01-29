@@ -1,5 +1,12 @@
 package com.nis1.thesis.udm;
 
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.util.Map;
+import java.util.Properties;
+
+import org.json.JSONObject;
+
 import com.nis1.thesis.sdk.CoreSystemApi;
 import com.nis1.thesis.sdk.Event;
 import com.nis1.thesis.sdk.MitigationAction;
@@ -8,12 +15,6 @@ import com.nis1.thesis.sdk.ModuleHelper;
 import com.nis1.thesis.sdk.PluggableModule;
 import com.nis1.thesis.udm.services.NetworkScannerService;
 import com.nis1.thesis.udm.services.OpenDaylightClient;
-import org.json.JSONObject;
-
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.util.Map;
-import java.util.Properties;
 
 /**
  * OpenDaylightModule - Integrates OpenDaylight SDN capabilities into the
@@ -62,11 +63,10 @@ public class OpenDaylightModule implements PluggableModule {
 
         this.running = true;
 
-        helper.log(getName(), "INFO", "Initializing OpenDaylightModule...");
+        helper.log(getName(), "INFO", "Initializing OpenDaylightModule... [VERSION 2.0 CHECK]");
         helper.log(getName(), "INFO", "Connected to ODL at: " + odlBaseUrl);
 
         // Subscribe to events
-        api.subscribeToEvent("INITIATE_MITIGATION", this::onMitigationCommand);
         api.subscribeToEvent("odl.topology.discover", this::onTopologyDiscover);
         api.subscribeToEvent("ODL_TOPOLOGY_DISCOVER", this::onTopologyDiscover);
 

@@ -144,8 +144,17 @@ class OdlService {
     }
 
     // Publish topology discovery (scan) command
-    async triggerNetworkScan() {
+    async triggerNetworkScan(startIp = null) {
         await this.waitForChannel();
+
+        const payload = {
+            type: 'ping_sweep',
+            target: 'all'
+        };
+
+        if (startIp) {
+            payload.start_ip = startIp;
+        }
 
         const command = {
             message_type: 'odl.topology.discover',
@@ -153,14 +162,11 @@ class OdlService {
             timestamp: new Date().toISOString(),
             event_type: 'manual.scan',
             source_module: 'Webapp',
-            payload: {
-                type: 'ping_sweep',
-                target: 'all'
-            }
+            payload: payload
         };
 
         this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
-        console.log(`📤 Published network scan command`);
+        console.log(`📤 Published network scan command${startIp ? ' for ' + startIp : ''}`);
         return { status: 'sent', command };
     }
 
