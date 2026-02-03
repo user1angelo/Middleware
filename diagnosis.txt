@@ -1,0 +1,31 @@
+=== Middleware Diagnostic Script ===
+
+[1] Current Working Directory: /home/gerome/Downloads/Ongoing middlewarewebapp repo/Middleware/webapp/backend
+
+[2] Checking Java...
+
+[3] Checking .env file...
+    OK: Found .env at: /home/gerome/Downloads/Ongoing middlewarewebapp repo/Middleware/webapp/backend/.env
+
+[4] Checking Middleware Paths...
+    MIDDLEWARE_ROOT resolved to: /home/gerome/Downloads/Ongoing middlewarewebapp repo/Middleware
+    - THREAT_CONTEXT_STORE_PATH: ../../ThreatContextStore
+      Resolved: /home/gerome/Downloads/Ongoing middlewarewebapp repo/Middleware/ThreatContextStore
+      [OK] Directory exists.
+      [OK] "out" directory exists (compiled).
+
+    - MODULE_REGISTRY_PATH: ../../ModuleRegistryLifecycleManager
+      Resolved: /home/gerome/Downloads/Ongoing middlewarewebapp repo/Middleware/ModuleRegistryLifecycleManager
+      [OK] Directory exists.
+      [OK] "out" directory exists (compiled).
+
+    - WORKFLOW_ENGINE_PATH: ../../WorkflowEngine
+      Resolved: /home/gerome/Downloads/Ongoing middlewarewebapp repo/Middleware/WorkflowEngine
+      [OK] Directory exists.
+      [OK] "out" directory exists (compiled).
+
+    - TCS_TESTER_PATH: ../../ThreatContextStoreTester
+      Resolved: /home/gerome/Downloads/Ongoing middlewarewebapp repo/Middleware/ThreatContextStoreTester
+      [OK] Directory exists.
+
+=== End of Diagnostic ===
