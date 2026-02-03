@@ -1,12 +1,5 @@
 package com.yourorg.registry;
 
-import com.nis1.thesis.sdk.CoreSystemApi;
-import com.nis1.thesis.sdk.Event;
-import com.nis1.thesis.sdk.MitigationAction;
-import com.nis1.thesis.sdk.MitigationCommandData;
-import com.nis1.thesis.sdk.PluggableModule;
-import org.json.JSONObject;
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -16,6 +9,15 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import com.nis1.thesis.sdk.CoreSystemApi;
+import com.nis1.thesis.sdk.Event;
+import com.nis1.thesis.sdk.MitigationAction;
+import com.nis1.thesis.sdk.MitigationCommandData;
+import com.nis1.thesis.sdk.PluggableModule;
 
 /**
  * SdkModuleHost
@@ -29,6 +31,7 @@ public class SdkModuleHost {
 
     private final Map<String, PluggableModule> activeModules = new HashMap<>();
     private final RealCoreSystemApi api = new RealCoreSystemApi();
+    private ModuleRegistry registry; // Reference to registry for auto-registration
 
     /**
      * Real implementation of CoreSystemApi that manages subscriptions.
@@ -49,6 +52,11 @@ public class SdkModuleHost {
         public void subscribeToEvent(String eventType, Consumer<Event<?>> listener) {
             System.out.println("[SdkModuleHost] Module subscribed to: " + eventType);
             listeners.computeIfAbsent(eventType, k -> Collections.synchronizedList(new ArrayList<>())).add(listener);
+        }
+        
+        // Get all subscribed event types (capabilities)
+        public List<String> getCapabilities() {
+            return new ArrayList<>(listeners.keySet());
         }
 
         public void dispatchLocal(Event<?> event) {
@@ -155,6 +163,13 @@ public class SdkModuleHost {
         return data;
     }
 
+    /**
+     * Set the module registry for auto-registration
+     */
+    public void setModuleRegistry(ModuleRegistry registry) {
+        this.registry = registry;
+    }
+
     public void initializeModules() {
         // NOTE: wired to OpenDaylightModule for this implementation
         initializeSingleModule("com.nis1.thesis.udm.OpenDaylightModule", api);
@@ -177,6 +192,11 @@ public class SdkModuleHost {
 
             activeModules.put(className, module);
             System.out.println("[SdkModuleHost] Initialized module: " + module.getName());
+            
+            // Auto-register with ModuleRegistry if available
+            if (registry != null) {
+                registerSdkModuleWithRegistry(module, className);
+            }
 
         } catch (ClassNotFoundException e) {
             System.out.println("[SdkModuleHost] SDK module class not found on classpath: " + className);
@@ -186,6 +206,44 @@ public class SdkModuleHost {
         }
     }
 
+    /**
+     * Register SDK module with ModuleRegistry
+     */
+    private void registerSdkModuleWithRegistry(PluggableModule module, String className) {
+        try {
+            // Get capabilities from API subscriptions
+            List<String> capabilities = api.getCapabilities();
+            
+            // Create registration message
+            JSONObject registration = new JSONObject();
+            registration.put("message_type", "module.register");
+            
+            JSONObject payload = new JSONObject();
+            String moduleId = "sdk-" + className.substring(className.lastIndexOf('.') + 1).toLowerCase();
+            payload.put("module_id", moduleId);
+            payload.put("module_name", module.getName());
+            payload.put("module_type", "SDK");
+            payload.put("capabilities", new JSONArray(capabilities));
+            payload.put("command_queue", moduleId + "_commands"); // SDK modules use in-memory dispatch
+            
+            JSONObject metadata = new JSONObject();
+            metadata.put("class_name", className);
+            metadata.put("runtime", "embedded");
+            payload.put("metadata", metadata);
+            
+            registration.put("payload", payload);
+            
+            // Register with ModuleRegistry
+            registry.registerModule(registration);
+            
+            System.out.println("[SdkModuleHost] ✅ Registered " + moduleId + " with capabilities: " + capabilities);
+            
+        } catch (Exception e) {
+            System.err.println("[SdkModuleHost] Failed to register module with registry: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
     public void shutdownModules() {
         for (Map.Entry<String, PluggableModule> entry : activeModules.entrySet()) {
             try {

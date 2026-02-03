@@ -96,8 +96,18 @@ public class CommandRoutingListener implements Runnable {
                 return;
             }
             
+            // Extract command from event_type or payload
+            String eventType = json.optString("event_type", "unknown");
             JSONObject payload = json.getJSONObject("payload");
-            String command = payload.getString("command");
+            
+            // Use event_type as the command (e.g., INITIATE_MITIGATION)
+            String command = eventType;
+            
+            // Allow override via explicit command field in payload (for backwards compatibility)
+            if (payload.has("command")) {
+                command = payload.getString("command");
+            }
+            
             String targetModule = payload.optString("target_module", null);
             
             System.out.println("🎯 Routing command: " + command);

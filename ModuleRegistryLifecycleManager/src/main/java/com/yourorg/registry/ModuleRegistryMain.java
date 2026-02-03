@@ -44,6 +44,7 @@ public class ModuleRegistryMain {
         // Initialize SDK-based pluggable modules (e.g., OpenDaylightModule)
         System.out.println("\n🔌 Initializing SDK-based modules from classpath...");
         sdkModuleHost = new SdkModuleHost();
+        sdkModuleHost.setModuleRegistry(registry); // Connect to registry for auto-registration
         sdkModuleHost.initializeModules();
 
         // Create component instances
