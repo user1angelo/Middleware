@@ -35,7 +35,7 @@ const PROCESSES = {
     command: 'java',
     // Include SDK classes and all UDM JARs on the classpath so SDK-based
     // plugins like OpenDaylightModule are actually loadable at runtime.
-    args: ['-cp', `out${path.delimiter}lib/*${path.delimiter}../nis-thesis-sdk/out${path.delimiter}${path.join(UDM_ROOT, 'out')}${path.delimiter}${path.join(UDM_ROOT, '*')}`, 'com.yourorg.registry.ModuleRegistryMain'],
+    args: ['-cp', `target/classes${path.delimiter}lib/*${path.delimiter}../nis-thesis-sdk/target/classes${path.delimiter}${path.join(UDM_ROOT, 'target/classes')}${path.delimiter}${path.join(UDM_ROOT, '*')}`, 'com.yourorg.registry.ModuleRegistryMain'],
     process: null,
     status: 'stopped',
     logFile: null,

@@ -12,7 +12,7 @@ const RABBITMQ_HOST = process.env.RABBITMQ_HOST || '127.0.0.1';
 const RABBITMQ_PORT = process.env.RABBITMQ_PORT || 5672;
 const RABBITMQ_USER = process.env.RABBITMQ_USER || 'user';
 const RABBITMQ_PASS = process.env.RABBITMQ_PASSWORD || 'password';
-const COMMAND_QUEUE = 'workflow_queue';
+const COMMAND_QUEUE = 'workflow_response_queue';
 
 class OdlService {
     constructor() {
@@ -126,10 +126,10 @@ class OdlService {
         await this.waitForChannel();
 
         const command = {
-            message_type: 'odl.host.isolate',
+            message_type: 'workflow_command',
             event_id: `manual-${Date.now()}`,
             timestamp: new Date().toISOString(),
-            event_type: 'manual.isolation',
+            event_type: 'INITIATE_MITIGATION',
             source_module: 'Webapp',
             payload: {
                 ip_address: ip,
