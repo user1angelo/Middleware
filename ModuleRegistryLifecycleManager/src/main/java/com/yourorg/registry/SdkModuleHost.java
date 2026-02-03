@@ -3,9 +3,18 @@ package com.yourorg.registry;
 import com.nis1.thesis.sdk.CoreSystemApi;
 import com.nis1.thesis.sdk.Event;
 import com.nis1.thesis.sdk.PluggableModule;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.google.gson.Gson;
+import org.json.JSONObject;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 /**
@@ -14,62 +23,112 @@ import java.util.function.Consumer;
  * Lightweight host that initializes SDK-based pluggable modules which are
  * already present on the JVM classpath (e.g. user-defined-modules/*.jar).
  *
- * This is intentionally minimal: it provides a stub CoreSystemApi that logs
- * publish/subscribe activity so we have runtime evidence that modules like
- * OpenDaylightModule are actually being loaded and initialized. It does NOT
- * yet integrate with RabbitMQ or the JSON-based ModuleRegistry messaging
- * pipeline.
+ * It provides a real CoreSystemApi implementation that bridges SDK events
+ * to the RabbitMQ-based ModuleRegistry messaging pipeline.
  */
 public class SdkModuleHost {
 
     private final Map<String, PluggableModule> activeModules = new HashMap<>();
+    private Connection rabbitConnection;
+    private Channel rabbitChannel;
+    private final Gson gson = new Gson();
 
     /**
-     * Simple CoreSystemApi stub that just logs publish/subscribe calls.
+     * CoreSystemApi implementation that publishes to RabbitMQ
      */
-    private static class LoggingCoreSystemApi implements CoreSystemApi {
+    private class RabbitMqCoreSystemApi implements CoreSystemApi {
         private final Map<String, Consumer<Event<?>>> listeners = new HashMap<>();
 
         @Override
         public void publishEvent(Event<?> event) {
-            System.out.println("[SdkModuleHost][CoreSystemApi] publishEvent type=" + event.getType()
-                    + " id=" + event.getId());
+            String workflowQueue = ConfigLoader.getWorkflowQueueName();
+
+            try {
+                if (rabbitChannel == null || !rabbitChannel.isOpen()) {
+                    System.err.println("[SdkModuleHost] RabbitMQ channel not open, dropping event: " + event.getId());
+                    return;
+                }
+
+                // Convert SDK Event to standard system message envelope
+                JSONObject message = new JSONObject();
+                message.put("message_type", "alert"); // Treat all published events as alerts for now
+                message.put("event_id", event.getId());
+                message.put("timestamp", DateTimeFormatter.ISO_INSTANT.format(event.getTimestamp()));
+                message.put("event_type", event.getType());
+                message.put("source_module", "SdkModuleHost");
+
+                // Serialize payload data using Gson
+                String dataJson = gson.toJson(event.getData());
+                message.put("payload", new JSONObject(dataJson));
+
+                byte[] body = message.toString().getBytes(StandardCharsets.UTF_8);
+                rabbitChannel.basicPublish("", workflowQueue, null, body);
+
+                System.out.println("[SdkModuleHost] Published event to " + workflowQueue + " type=" + event.getType());
+
+            } catch (IOException e) {
+                System.err.println("[SdkModuleHost] Failed to publish event: " + e.getMessage());
+                e.printStackTrace();
+            }
         }
 
         @Override
         public void subscribeToEvent(String eventType, Consumer<Event<?>> listener) {
             System.out.println("[SdkModuleHost][CoreSystemApi] subscribeToEvent pattern=" + eventType);
             listeners.put(eventType, listener);
-        }
-
-        public Map<String, Consumer<Event<?>>> getListeners() {
-            return listeners;
+            // TODO: Implement RabbitMQ consumption for subscriptions if needed
         }
     }
 
     /**
      * Initialize all SDK-based modules that we know about on the current
-     * classpath. For now this is explicitly wired to OpenDaylightModule so
-     * that we can prove opendaylight-module.jar is being loaded and run.
+     * classpath.
      */
     public void initializeModules() {
-        LoggingCoreSystemApi api = new LoggingCoreSystemApi();
+        // 1. Setup RabbitMQ connection
+        setupRabbitMQ();
 
-        // NOTE: This relies on the opendaylight-module JAR and the SDK
-        // classes being present on the Java classpath when
-        // ModuleRegistryMain is started. The web backend has been updated
-        // to include ../nis-thesis-sdk/out and ../user-defined-modules/*
-        // on the -cp for the ModuleRegistry process.
+        // 2. Create API instance
+        CoreSystemApi api = new RabbitMqCoreSystemApi();
+
+        // 3. Initialize known modules
+        // OpenDaylight
         initializeSingleModule("com.nis1.thesis.udm.OpenDaylightModule", api);
 
+        // Suricata HTTP Module
+        initializeSingleModule("com.nis1.thesis.udm.SuricataHttpModule", api);
+
         System.out.println("[SdkModuleHost] Active SDK modules: " + activeModules.keySet());
+    }
+
+    private void setupRabbitMQ() {
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost(ConfigLoader.getRabbitMQHost());
+        factory.setPort(ConfigLoader.getRabbitMQPort());
+        factory.setUsername(ConfigLoader.getRabbitMQUser());
+        factory.setPassword(ConfigLoader.getRabbitMQPassword());
+
+        try {
+            rabbitConnection = factory.newConnection();
+            rabbitChannel = rabbitConnection.createChannel();
+
+            String workflowQueue = ConfigLoader.getWorkflowQueueName();
+            rabbitChannel.queueDeclare(workflowQueue, true, false, false, null);
+
+            System.out.println("[SdkModuleHost] Connected to RabbitMQ at " + ConfigLoader.getRabbitMQHost());
+
+        } catch (IOException | TimeoutException e) {
+            System.err.println("[SdkModuleHost] Failed to connect to RabbitMQ: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     private void initializeSingleModule(String className, CoreSystemApi api) {
         try {
             Class<?> clazz = Class.forName(className);
             if (!PluggableModule.class.isAssignableFrom(clazz)) {
-                System.out.println("[SdkModuleHost] Class " + className + " does not implement PluggableModule; skipping.");
+                System.out.println(
+                        "[SdkModuleHost] Class " + className + " does not implement PluggableModule; skipping.");
                 return;
             }
 
@@ -99,9 +158,19 @@ public class SdkModuleHost {
                 System.out.println("[SdkModuleHost] Shutting down module: " + entry.getKey());
                 entry.getValue().shutdown();
             } catch (Throwable t) {
-                System.err.println("[SdkModuleHost] Error during shutdown of " + entry.getKey() + ": " + t.getMessage());
+                System.err
+                        .println("[SdkModuleHost] Error during shutdown of " + entry.getKey() + ": " + t.getMessage());
             }
         }
         activeModules.clear();
+
+        try {
+            if (rabbitChannel != null && rabbitChannel.isOpen())
+                rabbitChannel.close();
+            if (rabbitConnection != null && rabbitConnection.isOpen())
+                rabbitConnection.close();
+        } catch (Exception e) {
+            System.err.println("[SdkModuleHost] Error closing RabbitMQ: " + e.getMessage());
+        }
     }
 }
