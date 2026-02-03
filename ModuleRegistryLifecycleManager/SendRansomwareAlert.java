@@ -1,5 +1,4 @@
 
-
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
@@ -16,7 +15,8 @@ import java.util.UUID;
  * to the OpenDaylightModule via RabbitMQ.
  *
  * Usage:
- *   java -cp .:amqp-client-5.16.0.jar:json-20231013.jar com.nis1.thesis.test.SendRansomwareAlert
+ * java -cp .:amqp-client-5.16.0.jar:json-20231013.jar
+ * com.nis1.thesis.test.SendRansomwareAlert
  */
 public class SendRansomwareAlert {
 
@@ -39,27 +39,24 @@ public class SendRansomwareAlert {
         factory.setPassword(RABBITMQ_PASSWORD);
 
         try (Connection connection = factory.newConnection();
-             Channel channel = connection.createChannel()) {
+                Channel channel = connection.createChannel()) {
 
             channel.queueDeclare(COMMAND_QUEUE, true, false, false, null);
 
-            // Build the simulated ransomware alert → quarantine command
+            // Build the standard INITIATE_MITIGATION event
             JSONObject message = new JSONObject();
             message.put("message_type", "workflow_command");
             message.put("event_id", "sim-ransomware-" + UUID.randomUUID());
             message.put("timestamp", getCurrentManilaTime());
-            message.put("event_type", "security.alert");
+            message.put("event_type", "INITIATE_MITIGATION"); // Must match what ODL subscribes to
             message.put("source_module", "RansomwareSimulator");
 
             JSONObject payload = new JSONObject();
-            payload.put("command", "INITIATE_MITIGATION");
-
-            JSONObject parameters = new JSONObject();
-            parameters.put("targetHost", "10.0.0.1/32");
-            parameters.put("action", "QUARANTINE");
-            parameters.put("family", "RANSOMWARE_TEST");
-            parameters.put("description", "Simulated ransomware detection on 10.0.0.1");
-            payload.put("parameters", parameters);
+            payload.put("targetHost", "10.0.0.1"); // Simple IP string
+            payload.put("action", "ISOLATE_VLAN"); // Enum matching MitigationAction
+            payload.put("justification", "Simulated ransomware detection via Debug Script");
+            payload.put("priority", "high");
+            payload.put("sdn_controller", "opendaylight");
 
             message.put("payload", payload);
 
