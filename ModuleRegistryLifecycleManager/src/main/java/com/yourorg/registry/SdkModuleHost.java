@@ -134,6 +134,8 @@ public class SdkModuleHost {
     private String mapMessageTypeToEventType(String messageType) {
         if ("odl.host.isolate".equals(messageType))
             return "INITIATE_MITIGATION"; // Map workflow command to SDK event
+        if ("workflow_command".equals(messageType))
+            return "INITIATE_MITIGATION"; // Workflow commands from CommandRoutingListener
         if ("workflow.command".equals(messageType))
             return "INITIATE_MITIGATION"; // Generic mitigation legacy
         if ("odl.topology.discover".equals(messageType))
@@ -149,13 +151,26 @@ public class SdkModuleHost {
             return null;
 
         String ip = payload.optString("ip_address", payload.optString("targetHost"));
-        String reason = payload.optString("reason", "Automated mitigation");
+        String reason = payload.optString("reason", payload.optString("justification", "Automated mitigation"));
 
-        // Determine action
-        MitigationAction action = MitigationAction.BLOCK_IP; // Default
-        String msgType = json.optString("message_type");
-        if (msgType.contains("isolate"))
+        // Determine action from payload or message type
+        MitigationAction action = MitigationAction.ISOLATE_VLAN; // Default for isolation
+        
+        // Check if action is specified in payload
+        String actionStr = payload.optString("action", "");
+        if ("ISOLATE_VLAN".equals(actionStr) || "ISOLATE".equals(actionStr)) {
             action = MitigationAction.ISOLATE_VLAN;
+        } else if ("BLOCK_IP".equals(actionStr)) {
+            action = MitigationAction.BLOCK_IP;
+        } else if ("QUARANTINE".equals(actionStr)) {
+            action = MitigationAction.QUARANTINE;
+        } else {
+            // Fall back to message type check
+            String msgType = json.optString("message_type");
+            if (msgType.contains("isolate")) {
+                action = MitigationAction.ISOLATE_VLAN;
+            }
+        }
 
         MitigationCommandData data = new MitigationCommandData(ip, action, reason);
         data.setWorkflowInstanceId(json.optString("event_id"));

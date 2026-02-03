@@ -50,7 +50,7 @@ public class ModuleRegistryMain {
         // Create component instances
         System.out.println("\n🚀 Starting components...\n");
         alertListener = new AlertBroadcastListener(registry, sdkModuleHost);
-        commandListener = new CommandRoutingListener(registry);
+        commandListener = new CommandRoutingListener(registry, sdkModuleHost);
         healthMonitor = new HealthMonitor(registry);
 
         // Create thread pool for components

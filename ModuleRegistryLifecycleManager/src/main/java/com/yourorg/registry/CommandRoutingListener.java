@@ -1,10 +1,14 @@
 package com.yourorg.registry;
 
-import com.rabbitmq.client.*;
-import org.json.JSONObject;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+
+import org.json.JSONObject;
+
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DeliverCallback;
 
 /**
  * CommandRoutingListener - Routes workflow execution commands to UDMs
@@ -25,10 +29,16 @@ import java.nio.charset.StandardCharsets;
 public class CommandRoutingListener implements Runnable {
     
     private final ModuleRegistry registry;
+    private final SdkModuleHost sdkModuleHost;
     private volatile boolean running = true;
     
     public CommandRoutingListener(ModuleRegistry registry) {
+        this(registry, null);
+    }
+    
+    public CommandRoutingListener(ModuleRegistry registry, SdkModuleHost sdkModuleHost) {
         this.registry = registry;
+        this.sdkModuleHost = sdkModuleHost;
     }
     
     @Override
@@ -139,15 +149,26 @@ public class CommandRoutingListener implements Runnable {
             // Get the module's command queue
             String commandQueue = module.getCommandQueue();
             
-            // Declare the module's queue if it doesn't exist
-            channel.queueDeclare(commandQueue, true, false, false, null);
+            // Check if this is an SDK module (runtime: embedded)
+            boolean isSdkModule = false;
+            if (module.getMetadata() != null && "embedded".equals(module.getMetadata().optString("runtime"))) {
+                isSdkModule = true;
+            }
             
-            // Send command to module's queue
-            byte[] messageBytes = json.toString().getBytes(StandardCharsets.UTF_8);
-            channel.basicPublish("", commandQueue, null, messageBytes);
-            
-            System.out.println("✅ Routed command '" + command + "' to module '" + 
-                             module.getModuleId() + "' via queue '" + commandQueue + "'");
+            if (isSdkModule && sdkModuleHost != null) {
+                // SDK modules: dispatch directly to in-memory host
+                System.out.println("🔌 Dispatching to SDK module '" + module.getModuleId() + "' (in-memory)");
+                sdkModuleHost.dispatch(json);
+                System.out.println("✅ Routed command '" + command + "' to SDK module '" + 
+                                 module.getModuleId() + "' via SdkModuleHost");
+            } else {
+                // Standard UDMs: send to RabbitMQ queue
+                channel.queueDeclare(commandQueue, true, false, false, null);
+                byte[] messageBytes = json.toString().getBytes(StandardCharsets.UTF_8);
+                channel.basicPublish("", commandQueue, null, messageBytes);
+                System.out.println("✅ Routed command '" + command + "' to module '" + 
+                                 module.getModuleId() + "' via queue '" + commandQueue + "'");
+            }
             
         } catch (Exception e) {
             System.err.println("❌ Failed to route command: " + e.getMessage());
