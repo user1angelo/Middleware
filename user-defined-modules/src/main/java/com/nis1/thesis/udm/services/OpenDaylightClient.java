@@ -62,6 +62,11 @@ public class OpenDaylightClient {
 
     private boolean sendRestRequest(String method, String urlStr, String jsonBody) {
         try {
+            helper.log(moduleName, "DEBUG", "ODL Request: " + method + " " + urlStr);
+            if (jsonBody != null) {
+                helper.log(moduleName, "DEBUG", "Payload: " + jsonBody);
+            }
+
             URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod(method);
@@ -83,12 +88,24 @@ public class OpenDaylightClient {
             }
 
             int responseCode = conn.getResponseCode();
-            helper.log(moduleName, "INFO", "ODL RESTCONF " + method + " to " + urlStr + " returned " + responseCode);
+            helper.log(moduleName, "INFO", "ODL Response: " + responseCode + " for " + method + " " + urlStr);
+
+            if (responseCode >= 400) {
+                try (java.io.InputStream errorStream = conn.getErrorStream()) {
+                    if (errorStream != null) {
+                        String responseBody = new String(errorStream.readAllBytes(), StandardCharsets.UTF_8);
+                        helper.log(moduleName, "ERROR", "ODL Error Body: " + responseBody);
+                    }
+                } catch (Exception ex) {
+                    helper.log(moduleName, "ERROR", "Could not read error body: " + ex.getMessage());
+                }
+            }
 
             return responseCode >= 200 && responseCode < 300;
 
         } catch (Exception e) {
             helper.log(moduleName, "ERROR", "RESTCONF request failed: " + e.getMessage());
+            e.printStackTrace(); // Ensure full stack trace is visible
             return false;
         }
     }

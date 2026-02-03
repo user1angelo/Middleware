@@ -98,6 +98,9 @@ public class OpenDaylightModule implements PluggableModule {
             MitigationAction action = command.getAction();
 
             helper.log(getName(), "INFO", "Received mitigation request: " + action + " for " + targetHost);
+            helper.log(getName(), "DEBUG", "Full command data: " + command.toString()); // Assuming toString() is
+                                                                                        // useful, otherwise we trust
+                                                                                        // the fields
 
             if (action == MitigationAction.BLOCK_IP ||
                     action == MitigationAction.QUARANTINE ||
@@ -129,6 +132,8 @@ public class OpenDaylightModule implements PluggableModule {
 
         String startIp = null;
         Object data = event.getData();
+        helper.log(getName(), "DEBUG",
+                "Topology Discover Event Received. Data: " + (data != null ? data.toString() : "null"));
 
         // Extract start_ip from payload if available
         if (data instanceof JSONObject) {
