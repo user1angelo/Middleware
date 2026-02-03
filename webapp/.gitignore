@@ -3,8 +3,7 @@ node_modules/
 */node_modules/
 
 # Environment
-.env
-backend/.env
+
 
 # Logs
 logs/
