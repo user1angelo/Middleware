@@ -165,11 +165,11 @@ function openTerminalForLog(title, cwd, logPath) {
 // Start a process
 async function startProcess(processKey) {
   const proc = PROCESSES[processKey];
-  
+
   if (!proc) {
     throw new Error(`Unknown process: ${processKey}`);
   }
-  
+
   if (proc.process) {
     return { success: false, message: `${proc.name} is already running` };
   }
@@ -191,6 +191,20 @@ async function startProcess(processKey) {
     throw new Error(`${proc.name} command is not configured. Check your backend .env file.`);
   }
 
+  // Verify command exists (especially 'java')
+  try {
+    if (proc.command === 'java') {
+      spawnSync('java', ['-version'], { stdio: 'ignore' });
+    } else {
+      // For other commands, try 'which' or 'where'
+      const checkCmd = process.platform === 'win32' ? 'where' : 'which';
+      const res = spawnSync(checkCmd, [proc.command], { stdio: 'ignore' });
+      if (res.status !== 0) throw new Error('Not found');
+    }
+  } catch (e) {
+    throw new Error(`Command '${proc.command}' not found in system PATH. Please ensure it is installed.`);
+  }
+
   // For Java-based middleware components, enforce expected build layout
   if (proc.requiresJavaLayout !== false) {
     const outDir = path.join(proc.cwd, 'out');
@@ -198,14 +212,13 @@ async function startProcess(processKey) {
     if (!fsSync.existsSync(outDir)) {
       throw new Error(`${proc.name} is not compiled. Missing 'out' directory at ${outDir}`);
     }
+    // Lib check - explicit warning instead of hard crash maybe? No, let's keep it strict but clear
     if (!fsSync.existsSync(libDir)) {
       throw new Error(`${proc.name} missing 'lib' directory at ${libDir}`);
     }
   }
 
-  // Headful mode: run inside a real terminal so user can interact.
-  // We treat these as long-lived logical processes and do NOT tie their
-  // status to the short-lived terminal launcher PID.
+  // Headful mode
   if (proc.headful) {
     const term = findTerminal();
     if (!term) {
@@ -223,10 +236,9 @@ async function startProcess(processKey) {
         stdio: 'ignore'
       });
 
-      // Detach and do not track lifecycle of the external terminal
       childProcess.unref();
 
-      proc.process = null; // no PID tracking for headful terminals
+      proc.process = null;
       proc.status = 'running';
       proc.logFile = null;
 
@@ -240,104 +252,94 @@ async function startProcess(processKey) {
       };
     } catch (error) {
       proc.status = 'error';
-      throw new Error(`Failed to start ${proc.name}: ${error.message}`);
+      throw new Error(`Failed to start ${proc.name} terminal: ${error.message}`);
     }
   }
-  
-  const logsDir = await ensureLogsDir();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const logFilePath = path.join(logsDir, `${processKey}_${timestamp}.log`);
-  
+
+  // Non-headful start
+  let logFilePath;
+  let logStream;
+
   try {
-    // Use sync write stream for logs
-    const logStream = fsSync.createWriteStream(logFilePath, { flags: 'a' });
+    const logsDir = await ensureLogsDir();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    logFilePath = path.join(logsDir, `${processKey}_${timestamp}.log`);
+
+    logStream = fsSync.createWriteStream(logFilePath, { flags: 'a' });
+  } catch (err) {
+    throw new Error(`Failed to create log file: ${err.message}. Check permissions for 'webapp/logs'.`);
+  }
+
+  try {
     proc.logFile = logFilePath;
-    
+
+    // Explicitly handle spawn errors
     const childProcess = spawn(proc.command, proc.args, {
       cwd: proc.cwd,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    
+
+    // Spawn error handling (immediate failure)
+    childProcess.on('error', (err) => {
+      proc.process = null;
+      proc.status = 'error';
+      if (logStream) logStream.end();
+      console.error(`${proc.name} spawn error:`, err);
+      if (logService) logService.broadcastLog(processKey, `\n[FATAL START ERROR: ${err.message}]\n`);
+    });
+
+    if (!childProcess.pid) {
+      throw new Error(`Failed to spawn ${proc.name}. Process ID is null.`);
+    }
+
     proc.process = childProcess;
     proc.status = 'running';
-    
+
     console.log(`Started ${proc.name} with PID ${childProcess.pid}`);
 
     // Open a terminal window to live-tail the log
     openTerminalForLog(proc.name, proc.cwd, logFilePath);
-    
+
     // Handle stdout
     childProcess.stdout.setEncoding('utf8');
     childProcess.stdout.on('data', (data) => {
       const output = data.toString();
-      
-      // Write to log file
       logStream.write(output);
-      
-      // Stream to WebSocket
-      console.log(`[${processKey}] stdout (${output.length} bytes):`, output.substring(0, 100).replace(/\n/g, ' '));
-      if (logService) {
-        console.log(`[${processKey}] Broadcasting to WebSocket...`);
-        logService.broadcastLog(processKey, output);
-      } else {
-        console.error(`[${processKey}] ERROR: logService is NULL - cannot broadcast logs!`);
-      }
+      console.log(`[${processKey}] stdout:`, output.substring(0, 100).replace(/\n/g, ' '));
+      if (logService) logService.broadcastLog(processKey, output);
     });
-    
+
     // Handle stderr
     childProcess.stderr.setEncoding('utf8');
     childProcess.stderr.on('data', (data) => {
       const output = data.toString();
-      
-      // Write to log file
       logStream.write(output);
-      
-      // Stream to WebSocket
-      console.log(`[${processKey}] stderr (${output.length} bytes):`, output.substring(0, 100).replace(/\n/g, ' '));
-      if (logService) {
-        console.log(`[${processKey}] Broadcasting stderr to WebSocket...`);
-        logService.broadcastLog(processKey, output);
-      } else {
-        console.error(`[${processKey}] ERROR: logService is NULL - cannot broadcast logs!`);
-      }
+      console.log(`[${processKey}] stderr:`, output.substring(0, 100).replace(/\n/g, ' '));
+      if (logService) logService.broadcastLog(processKey, output);
     });
-    
+
     // Handle process exit
     childProcess.on('close', (code) => {
       proc.process = null;
       proc.status = 'stopped';
       logStream.end();
-      
       if (logService) {
         logService.broadcastLog(processKey, `\n[Process exited with code ${code}]\n`);
       }
-      
       console.log(`${proc.name} exited with code ${code}`);
     });
-    
-    // Handle errors
-    childProcess.on('error', (error) => {
-      proc.process = null;
-      proc.status = 'error';
-      logStream.end();
-      
-      if (logService) {
-        logService.broadcastLog(processKey, `\n[Process error: ${error.message}]\n`);
-      }
-      
-      console.error(`${proc.name} error:`, error);
-    });
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       message: `${proc.name} started successfully`,
       logFile: logFilePath,
       pid: childProcess.pid
     };
-    
+
   } catch (error) {
     proc.status = 'error';
+    if (logStream) logStream.end();
     throw new Error(`Failed to start ${proc.name}: ${error.message}`);
   }
 }
@@ -345,26 +347,26 @@ async function startProcess(processKey) {
 // Stop a process
 async function stopProcess(processKey) {
   const proc = PROCESSES[processKey];
-  
+
   if (!proc) {
     throw new Error(`Unknown process: ${processKey}`);
   }
-  
+
   // If there is no tracked child process, report not running.
   if (!proc.process) {
     return { success: false, message: `${proc.name} is not running` };
   }
-  
+
   try {
     proc.process.kill('SIGTERM');
-    
+
     // Force kill after 5 seconds if still running
     setTimeout(() => {
       if (proc.process) {
         proc.process.kill('SIGKILL');
       }
     }, 5000);
-    
+
     return { success: true, message: `${proc.name} stopped successfully` };
   } catch (error) {
     throw new Error(`Failed to stop ${proc.name}: ${error.message}`);
@@ -374,7 +376,7 @@ async function stopProcess(processKey) {
 // Get status of all processes
 function getAllStatus() {
   const status = {};
-  
+
   for (const [key, proc] of Object.entries(PROCESSES)) {
     status[key] = {
       name: proc.name,
@@ -383,20 +385,20 @@ function getAllStatus() {
       logFile: proc.logFile
     };
   }
-  
+
   return status;
 }
 
 // Stop all processes
 async function stopAll() {
   const promises = [];
-  
+
   for (const key of Object.keys(PROCESSES)) {
     if (PROCESSES[key].process) {
       promises.push(stopProcess(key));
     }
   }
-  
+
   await Promise.allSettled(promises);
 }
 
