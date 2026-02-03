@@ -132,9 +132,13 @@ class OdlService {
             event_type: 'INITIATE_MITIGATION',
             source_module: 'Webapp',
             payload: {
-                ip_address: ip,
-                mac_address: mac,
-                reason: 'Manual isolation via Web Dashboard'
+                targetHost: ip,
+                action: 'ISOLATE_VLAN',
+                priority: 'high',
+                sdn_controller: 'opendaylight',
+                justification: 'Manual isolation via Web Dashboard',
+                // Optional extras if needed for debugging
+                mac_address: mac
             }
         };
 
@@ -160,7 +164,7 @@ class OdlService {
             message_type: 'odl.topology.discover',
             event_id: `scan-${Date.now()}`,
             timestamp: new Date().toISOString(),
-            event_type: 'manual.scan',
+            event_type: 'ODL_TOPOLOGY_DISCOVER',
             source_module: 'Webapp',
             payload: payload
         };
