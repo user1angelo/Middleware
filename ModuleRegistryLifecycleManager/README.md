@@ -174,7 +174,7 @@ psql -U postgres -f schema_registered_modules.sql
 
 ### Prerequisites
 1. **RabbitMQ** running at `192.168.86.76:5672`
-2. **PostgreSQL** running at `192.168.86.28:5432`
+2. **PostgreSQL** running at `192.168.171.145:5432`
 3. **Database schema** installed (see above)
 
 ### 1. Start ModuleRegistry
@@ -296,7 +296,7 @@ In the UDMTester terminal, choose option **2** to send 10 ransomware alerts.
 Create `config.properties`:
 ```properties
 # Database
-db.host=192.168.86.28
+db.host=192.168.171.145
 db.port=5432
 db.name=wazuhdb
 db.user=postgres

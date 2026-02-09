@@ -141,7 +141,7 @@
 
 ### ⏳ Runtime Testing (Pending RabbitMQ)
 - Requires RabbitMQ at `192.168.86.76:5672`
-- Requires PostgreSQL at `192.168.86.28:5432`
+- Requires PostgreSQL at `192.168.171.145:5432`
 - Requires `registered_modules` table in database
 
 ---

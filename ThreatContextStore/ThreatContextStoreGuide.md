@@ -132,7 +132,7 @@ cp config.properties.example config.properties
 # Edit config.properties with your settings
 
 # 3. Initialize database
-psql -U postgres -h 192.168.86.28 -f schema.sql
+psql -U postgres -h 192.168.171.145 -f schema.sql
 
 # 4. Compile the project
 javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
@@ -162,7 +162,7 @@ cp config.properties.example config.properties
 
 #### Database Settings
 ```properties
-db.host=192.168.86.28        # PostgreSQL server hostname/IP
+db.host=192.168.171.145        # PostgreSQL server hostname/IP
 db.port=5432                  # PostgreSQL port
 db.name=wazuhdb              # Database name
 db.user=postgres             # Database username
@@ -375,7 +375,7 @@ If RabbitMQ is available, QueryDemo will also republish alerts to the queue. Thi
 1. **Verify infrastructure:**
    ```bash
    # Check PostgreSQL
-   psql -U postgres -h 192.168.86.28 -c "\l" | grep wazuhdb
+  psql -U postgres -h 192.168.171.145 -c "\l" | grep wazuhdb
    
    # Check RabbitMQ
    curl -u guest:guest http://192.168.86.76:15672/api/overview
@@ -468,7 +468,7 @@ HAVING COUNT(*) > 1;
    ```
 4. Verify insertion:
    ```bash
-   psql -U postgres -h 192.168.86.28 -d wazuhdb -c "SELECT COUNT(*) FROM wazuh_alerts;"
+  psql -U postgres -h 192.168.171.145 -d wazuhdb -c "SELECT COUNT(*) FROM wazuh_alerts;"
    ```
 
 ### Use Case 2: Finding High-Severity Threats
@@ -483,7 +483,7 @@ HAVING COUNT(*) > 1;
 2. Review files in `output/` directory
 3. Or query directly:
    ```sql
-   psql -U postgres -h 192.168.86.28 -d wazuhdb -c \
+  psql -U postgres -h 192.168.171.145 -d wazuhdb -c \
    "SELECT event_id, timestamp, payload->>'alert_type', payload->>'signature' 
     FROM wazuh_alerts 
     WHERE payload->>'severity' = 'high' 
@@ -592,7 +592,7 @@ systemctl status postgresql  # Linux
 brew services list | grep postgres  # macOS
 
 # 2. Verify connection manually
-psql -U postgres -h 192.168.86.28 -d wazuhdb
+psql -U postgres -h 192.168.171.145 -d wazuhdb
 
 # 3. Check PostgreSQL configuration
 # Edit postgresql.conf:
@@ -685,7 +685,7 @@ ps aux | grep RabbitMQListener
 java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
 
 # 3. Check database connectivity
-psql -U postgres -h 192.168.86.28 -d wazuhdb -c "SELECT 1;"
+psql -U postgres -h 192.168.171.145 -d wazuhdb -c "SELECT 1;"
 
 # 4. Inspect queue
 curl -u guest:guest http://192.168.86.76:15672/api/queues/%2F/alerts_queue
@@ -778,7 +778,7 @@ java -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
 **Test Individual Components:**
 ```bash
 # Test database connection only
-psql -U postgres -h 192.168.86.28 -d wazuhdb -c "SELECT NOW();"
+psql -U postgres -h 192.168.171.145 -d wazuhdb -c "SELECT NOW();"
 
 # Test RabbitMQ connection only
 telnet 192.168.86.76 5672
@@ -793,7 +793,7 @@ jq . messages/alert_1.json
 watch "ps aux | grep java | grep middleware"
 
 # Monitor database connections
-watch "psql -U postgres -h 192.168.86.28 -d wazuhdb -c \
+watch "psql -U postgres -h 192.168.171.145 -d wazuhdb -c \
   'SELECT count(*) FROM pg_stat_activity;'"
 ```
 
@@ -1304,7 +1304,7 @@ cd ThreatContextStore
 javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
 
 # 2. Recreate database with new schema
-psql -U postgres -h 192.168.86.28 -f schema.sql
+psql -U postgres -h 192.168.171.145 -f schema.sql
 
 # 3. Start listener
 java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
@@ -1313,7 +1313,7 @@ java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
 java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
 
 # 5. Verify in database
-psql -U postgres -h 192.168.86.28 -d wazuhdb -c "SELECT message_type, COUNT(*) FROM wazuh_alerts GROUP BY message_type;"
+psql -U postgres -h 192.168.171.145 -d wazuhdb -c "SELECT message_type, COUNT(*) FROM wazuh_alerts GROUP BY message_type;"
 ```
 
 ### Troubleshooting Message Types

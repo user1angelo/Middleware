@@ -123,7 +123,7 @@ The tester generates random alerts with:
 4. **Verify Results:**
    - Check ThreatContextStore console for processing logs
    - Check `../ThreatContextStore/query_responses/` for result files
-   - Query database: `psql -U postgres -h 192.168.86.28 -d wazuhdb -c "SELECT COUNT(*) FROM wazuh_alerts;"`
+   - Query database: `psql -U postgres -h 192.168.171.145 -d wazuhdb -c "SELECT COUNT(*) FROM wazuh_alerts;"`
 
 ## Notes
 

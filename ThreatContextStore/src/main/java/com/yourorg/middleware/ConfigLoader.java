@@ -32,7 +32,7 @@ public class ConfigLoader {
 
     // Database configuration
     public static String getDbHost() {
-        return get("db.host", "192.168.86.28");
+        return get("db.host", "192.168.171.145");
     }
 
     public static int getDbPort() {

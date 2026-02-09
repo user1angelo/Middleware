@@ -92,6 +92,21 @@ async function compileUserDefinedModules() {
   }
 }
 
+async function compileThreatContextStore(tcsPath) {
+  const compileCmd = `cd ${shellEscapeArg(tcsPath)} && mkdir -p out && ` +
+    `javac -cp "lib/*${path.delimiter}out" -d out src/main/java/com/yourorg/middleware/*.java`;
+
+  console.log('[processManager] Compiling ThreatContextStore with:', compileCmd);
+
+  const result = spawnSync('bash', ['-lc', compileCmd], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    const stderr = result.stderr || '';
+    const stdout = result.stdout || '';
+    console.error('[processManager] ThreatContextStore compile failed:', stderr || stdout);
+    throw new Error('Failed to compile ThreatContextStore. See backend logs for details.');
+  }
+}
+
 // Helper: find an installed terminal emulator
 function findTerminal() {
   const candidates = [
@@ -211,10 +226,28 @@ async function startProcess(processKey) {
     const outDir = path.join(proc.cwd, 'out');
     const libDir = path.join(proc.cwd, 'lib');
     if (!fsSync.existsSync(outDir)) {
-      throw new Error(`${proc.name} is not compiled. Missing 'out' directory at ${outDir}`);
+      if (processKey === 'threatContextStore') {
+        await compileThreatContextStore(proc.cwd);
+      } else {
+        throw new Error(`${proc.name} is not compiled. Missing 'out' directory at ${outDir}`);
+      }
     }
     if (!fsSync.existsSync(libDir)) {
       throw new Error(`${proc.name} missing 'lib' directory at ${libDir}`);
+    }
+  }
+
+  if (processKey === 'threatContextStore') {
+    const mainClassFile = path.join(
+      proc.cwd,
+      'out',
+      'com',
+      'yourorg',
+      'middleware',
+      'ThreatContextStoreMain.class'
+    );
+    if (!fsSync.existsSync(mainClassFile)) {
+      await compileThreatContextStore(proc.cwd);
     }
   }
 

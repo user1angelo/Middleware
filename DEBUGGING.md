@@ -12,7 +12,7 @@ The most common issue is missing database columns. Verify your schema:
 
 ```bash
 # Connect to PostgreSQL
-psql -h 192.168.86.28 -U postgres -d wazuhdb
+psql -h 192.168.171.145 -U postgres -d wazuhdb
 
 # Check table structure
 \d wazuh_alerts

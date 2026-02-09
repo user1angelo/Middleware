@@ -3,7 +3,7 @@
 ## Prerequisites Check
 
 Before starting, ensure:
-- ✅ PostgreSQL is running at `192.168.86.28:5432`
+- ✅ PostgreSQL is running at `192.168.171.145:5432`
 - ✅ RabbitMQ is running at `192.168.86.76:5672`
 - ✅ Database schema is up-to-date (see below)
 - ✅ Java 17+ is installed
@@ -15,8 +15,8 @@ Before starting, ensure:
 Run this on your PostgreSQL server to add missing columns:
 
 ```bash
-# Connect to your PostgreSQL server at 192.168.86.28
-ssh user@192.168.86.28
+# Connect to your PostgreSQL server at 192.168.171.145
+ssh user@192.168.171.145
 
 # Run migration
 psql -U postgres -d wazuhdb << EOF
@@ -117,7 +117,7 @@ cat ~/Documents/GitHub/Middleware/ThreatContextStore/query_responses/<some-event
 
 ```bash
 # From any machine with PostgreSQL client
-psql -h 192.168.86.28 -U postgres -d wazuhdb -c "
+psql -h 192.168.171.145 -U postgres -d wazuhdb -c "
 SELECT 
     message_type, 
     COUNT(*) as count 
@@ -227,6 +227,6 @@ java -cp ".:../ThreatContextStore/lib/*" TCSTester
 ls -la ~/Documents/GitHub/Middleware/ThreatContextStore/query_responses/
 
 # Query database
-psql -h 192.168.86.28 -U postgres -d wazuhdb -c "SELECT COUNT(*) FROM wazuh_alerts;"
+psql -h 192.168.171.145 -U postgres -d wazuhdb -c "SELECT COUNT(*) FROM wazuh_alerts;"
 ```
 
