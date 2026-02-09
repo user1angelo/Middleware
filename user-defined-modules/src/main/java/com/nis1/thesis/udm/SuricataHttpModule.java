@@ -50,6 +50,12 @@ public class SuricataHttpModule implements PluggableModule {
     private int httpPort = 8090;
     private String httpPath = "/suricata/alerts";
 
+    // Automated isolation configuration
+    private boolean autoIsolateEnabled = true;
+    private int minThreatScore = 75;
+    private String severityThreshold = "high"; // "critical" or "high"
+    private String[] highRiskCategories = { "ransomware", "apt_activity", "c2_communication", "malware" };
+
     private volatile boolean running = false;
     private final Gson gson = new Gson();
 
@@ -123,7 +129,16 @@ public class SuricataHttpModule implements PluggableModule {
             httpPort = Integer.parseInt(props.getProperty("suricata.http.port", String.valueOf(httpPort)));
             httpPath = props.getProperty("suricata.http.path", httpPath);
 
+            // Load automated isolation configuration
+            autoIsolateEnabled = Boolean.parseBoolean(props.getProperty("suricata.auto_isolate.enabled", "true"));
+            minThreatScore = Integer.parseInt(props.getProperty("suricata.auto_isolate.min_threat_score", "75"));
+            severityThreshold = props.getProperty("suricata.auto_isolate.severity_threshold", "high");
+            String categoriesStr = props.getProperty("suricata.auto_isolate.categories",
+                    "ransomware,apt_activity,c2_communication,malware");
+            highRiskCategories = categoriesStr.split(",");
+
             System.out.println("[SuricataHttpModule] Loaded config from " + CONFIG_PATH);
+            System.out.println("[SuricataHttpModule] Auto-isolation enabled: " + autoIsolateEnabled);
         } catch (IOException e) {
             System.out.println("[SuricataHttpModule][WARN] Could not load config (using defaults): " + e.getMessage());
         }
@@ -264,6 +279,94 @@ public class SuricataHttpModule implements PluggableModule {
                         payload.getDestinationIp(),
                         payload.getDestinationPort(),
                         payload.getProtocol()));
+
+        // Automated isolation logic
+        if (shouldTriggerIsolation(payload)) {
+            triggerAutomatedIsolation(payload);
+        }
+    }
+
+    /**
+     * Evaluate whether an alert should trigger automated isolation.
+     * 
+     * @param alert The Suricata alert data to evaluate
+     * @return true if isolation should be triggered
+     */
+    private boolean shouldTriggerIsolation(SuricataAlertData alert) {
+        if (!autoIsolateEnabled) {
+            helper.log(getName(), "DEBUG", "Auto-isolation is disabled");
+            return false;
+        }
+
+        // Check threat score threshold
+        if (alert.getThreatScore() == null || alert.getThreatScore() < minThreatScore) {
+            helper.log(getName(), "DEBUG",
+                    String.format("Alert threat score (%d) below threshold (%d)",
+                            alert.getThreatScore(), minThreatScore));
+            return false;
+        }
+
+        // Check severity threshold
+        String severity = alert.getSeverity();
+        boolean severityMet = false;
+        if ("critical".equalsIgnoreCase(severity)) {
+            severityMet = true;
+        } else if ("high".equalsIgnoreCase(severity) &&
+                ("high".equalsIgnoreCase(severityThreshold) || "medium".equalsIgnoreCase(severityThreshold))) {
+            severityMet = true;
+        }
+
+        if (!severityMet) {
+            helper.log(getName(), "DEBUG",
+                    String.format("Alert severity (%s) does not meet threshold (%s)",
+                            severity, severityThreshold));
+            return false;
+        }
+
+        // Check if category is high-risk
+        String category = alert.getCategory();
+        if (category != null) {
+            for (String riskCategory : highRiskCategories) {
+                if (category.toLowerCase().contains(riskCategory.toLowerCase().trim())) {
+                    helper.log(getName(), "INFO",
+                            String.format("ISOLATION CRITERIA MET: score=%d, severity=%s, category=%s",
+                                    alert.getThreatScore(), severity, category));
+                    return true;
+                }
+            }
+        }
+
+        helper.log(getName(), "DEBUG",
+                String.format("Alert category (%s) not in high-risk list", category));
+        return false;
+    }
+
+    /**
+     * Trigger automated isolation by publishing a mitigation command.
+     * 
+     * @param alert The alert that triggered the isolation
+     */
+    private void triggerAutomatedIsolation(SuricataAlertData alert) {
+        String targetHost = alert.getSourceIp();
+        String justification = String.format(
+                "Automated isolation: Suricata detected %s (severity=%s, score=%d, sig=%s)",
+                alert.getCategory(),
+                alert.getSeverity(),
+                alert.getThreatScore(),
+                alert.getSignature());
+
+        helper.log(getName(), "WARN",
+                String.format("🚨 AUTO-ISOLATION TRIGGERED for %s - %s",
+                        targetHost, justification));
+
+        // Publish mitigation command using SDK helper
+        helper.publishMitigationCommand(
+                targetHost,
+                com.nis1.thesis.sdk.MitigationAction.ISOLATE_VLAN,
+                justification);
+
+        helper.log(getName(), "INFO",
+                String.format("Published mitigation command: ISOLATE_VLAN for %s", targetHost));
     }
 
     // ---------------------------------------------------------------------
@@ -271,7 +374,8 @@ public class SuricataHttpModule implements PluggableModule {
     // ---------------------------------------------------------------------
 
     private String categorizeFromSignature(String signature) {
-        if (signature == null) return "unknown";
+        if (signature == null)
+            return "unknown";
         String lower = signature.toLowerCase();
 
         if (lower.contains("malware") || lower.contains("trojan")) {
