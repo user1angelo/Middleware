@@ -1,14 +1,20 @@
 package com.yourorg.registry;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * ModuleRegistry - Tracks registered User-Defined Modules
@@ -143,8 +149,13 @@ public class ModuleRegistry {
                 System.out.println("🟢 Module back online: " + moduleId);
             }
             
-            // Update in database
-            updateModule(moduleId, now, "online");
+            // Update in database (skip for SDK modules to avoid database errors)
+            boolean isSdkModule = module.getMetadata() != null && 
+                                 "embedded".equals(module.getMetadata().optString("runtime"));
+            
+            if (!isSdkModule) {
+                updateModule(moduleId, now, "online");
+            }
         } else {
             System.out.println("⚠️  Heartbeat from unregistered module: " + moduleId);
         }
@@ -156,6 +167,15 @@ public class ModuleRegistry {
     public void markModuleOffline(String moduleId) {
         RegisteredModule module = modules.get(moduleId);
         if (module != null) {
+            // Don't mark SDK modules offline (they run in-memory)
+            boolean isSdkModule = module.getMetadata() != null && 
+                                 "embedded".equals(module.getMetadata().optString("runtime"));
+            
+            if (isSdkModule) {
+                System.out.println("⚠️  Skipping offline marking for SDK module: " + moduleId + " (runs in-memory)");
+                return;
+            }
+            
             module.setStatus("offline");
             updateModuleStatus(moduleId, "offline");
             System.out.println("🔴 Module marked offline: " + moduleId);
