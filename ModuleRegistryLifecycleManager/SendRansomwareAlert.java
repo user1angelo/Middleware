@@ -14,9 +14,20 @@ import java.util.UUID;
  * Standalone test utility that sends a simulated ransomware mitigation command
  * to the OpenDaylightModule via RabbitMQ.
  *
+ * This utility allows testing of the automatic host isolation system by sending
+ * a ransomware alert for a specified IP address.
+ *
  * Usage:
- * java -cp .:amqp-client-5.16.0.jar:json-20231013.jar
- * com.nis1.thesis.test.SendRansomwareAlert
+ * Windows:
+ * java -cp ".;lib/*" SendRansomwareAlert [IP_ADDRESS]
+ * 
+ * Linux/Mac:
+ * java -cp ".:lib/*" SendRansomwareAlert [IP_ADDRESS]
+ *
+ * Examples:
+ * java -cp ".;lib/*" SendRansomwareAlert 192.168.1.100
+ * java -cp ".;lib/*" SendRansomwareAlert 10.0.0.50
+ * java -cp ".;lib/*" SendRansomwareAlert (uses default: 10.0.0.1)
  */
 public class SendRansomwareAlert {
 
@@ -28,9 +39,26 @@ public class SendRansomwareAlert {
     private static final String COMMAND_QUEUE = "odl_commands_queue";
     private static final ZoneId MANILA_ZONE = ZoneId.of("Asia/Manila");
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+    private static final String DEFAULT_TARGET_IP = "10.0.0.1";
 
     public static void main(String[] args) {
+        // Parse target IP from command-line argument or use default
+        String targetIp = DEFAULT_TARGET_IP;
+
+        if (args.length > 0) {
+            String providedIp = args[0].trim();
+            if (isValidIpAddress(providedIp)) {
+                targetIp = providedIp;
+            } else {
+                System.err.println("❌ Invalid IP address format: " + providedIp);
+                System.err.println("Usage: java -cp \".;lib/*\" SendRansomwareAlert [IP_ADDRESS]");
+                System.err.println("Example: java -cp \".;lib/*\" SendRansomwareAlert 192.168.1.100");
+                System.exit(1);
+            }
+        }
+
         System.out.println("🚨 Sending simulated ransomware alert to OpenDaylightModule...");
+        System.out.println("🎯 Target IP for isolation: " + targetIp);
 
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost(RABBITMQ_HOST);
@@ -52,9 +80,9 @@ public class SendRansomwareAlert {
             message.put("source_module", "RansomwareSimulator");
 
             JSONObject payload = new JSONObject();
-            payload.put("targetHost", "10.0.0.1"); // Simple IP string
+            payload.put("targetHost", targetIp); // User-specified or default IP
             payload.put("action", "ISOLATE_VLAN"); // Enum matching MitigationAction
-            payload.put("justification", "Simulated ransomware detection via Debug Script");
+            payload.put("justification", "Simulated ransomware detection for IP: " + targetIp);
             payload.put("priority", "high");
             payload.put("sdn_controller", "opendaylight");
 
@@ -71,6 +99,22 @@ public class SendRansomwareAlert {
             System.err.println("❌ Failed to send test message: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Validates IPv4 address format.
+     * 
+     * @param ip The IP address string to validate
+     * @return true if valid IPv4 format, false otherwise
+     */
+    private static boolean isValidIpAddress(String ip) {
+        if (ip == null || ip.isEmpty()) {
+            return false;
+        }
+
+        // Simple IPv4 validation regex
+        String ipv4Pattern = "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$";
+        return ip.matches(ipv4Pattern);
     }
 
     private static String getCurrentManilaTime() {
