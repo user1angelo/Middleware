@@ -53,7 +53,7 @@ public class SdkModuleHost {
             System.out.println("[SdkModuleHost] Module subscribed to: " + eventType);
             listeners.computeIfAbsent(eventType, k -> Collections.synchronizedList(new ArrayList<>())).add(listener);
         }
-
+        
         // Get all subscribed event types (capabilities)
         public List<String> getCapabilities() {
             return new ArrayList<>(listeners.keySet());
@@ -155,7 +155,7 @@ public class SdkModuleHost {
 
         // Determine action from payload or message type
         MitigationAction action = MitigationAction.ISOLATE_VLAN; // Default for isolation
-
+        
         // Check if action is specified in payload
         String actionStr = payload.optString("action", "");
         if ("ISOLATE_VLAN".equals(actionStr) || "ISOLATE".equals(actionStr)) {
@@ -186,14 +186,8 @@ public class SdkModuleHost {
     }
 
     public void initializeModules() {
-        // Load OpenDaylight Module (SDN Control)
+        // NOTE: wired to OpenDaylightModule for this implementation
         initializeSingleModule("com.nis1.thesis.udm.OpenDaylightModule", api);
-
-        // Load Suricata HTTP Module (NIDS)
-        initializeSingleModule("com.nis1.thesis.udm.SuricataHttpModule", api);
-
-        // Load Zeek Module (NIDS)
-        initializeSingleModule("com.nis1.thesis.udm.ZeekModule", api);
     }
 
     private void initializeSingleModule(String className, CoreSystemApi api) {
@@ -213,7 +207,7 @@ public class SdkModuleHost {
 
             activeModules.put(className, module);
             System.out.println("[SdkModuleHost] Initialized module: " + module.getName());
-
+            
             // Auto-register with ModuleRegistry if available
             if (registry != null) {
                 registerSdkModuleWithRegistry(module, className);
@@ -234,11 +228,11 @@ public class SdkModuleHost {
         try {
             // Get capabilities from API subscriptions
             List<String> capabilities = api.getCapabilities();
-
+            
             // Create registration message
             JSONObject registration = new JSONObject();
             registration.put("message_type", "module.register");
-
+            
             JSONObject payload = new JSONObject();
             String moduleId = "sdk-" + className.substring(className.lastIndexOf('.') + 1).toLowerCase();
             payload.put("module_id", moduleId);
@@ -246,25 +240,25 @@ public class SdkModuleHost {
             payload.put("module_type", "SDK");
             payload.put("capabilities", new JSONArray(capabilities));
             payload.put("command_queue", moduleId + "_commands"); // SDK modules use in-memory dispatch
-
+            
             JSONObject metadata = new JSONObject();
             metadata.put("class_name", className);
             metadata.put("runtime", "embedded");
             payload.put("metadata", metadata);
-
+            
             registration.put("payload", payload);
-
+            
             // Register with ModuleRegistry
             registry.registerModule(registration);
-
+            
             System.out.println("[SdkModuleHost] ✅ Registered " + moduleId + " with capabilities: " + capabilities);
-
+            
         } catch (Exception e) {
             System.err.println("[SdkModuleHost] Failed to register module with registry: " + e.getMessage());
             e.printStackTrace();
         }
     }
-
+    
     public void shutdownModules() {
         for (Map.Entry<String, PluggableModule> entry : activeModules.entrySet()) {
             try {
