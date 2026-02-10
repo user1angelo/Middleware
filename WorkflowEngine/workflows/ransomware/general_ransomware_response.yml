@@ -17,7 +17,7 @@ steps:
         type: "RANSOMWARE_DETECTED"
         data:
           event_id: "{{ trigger.event_id }}"
-          host_id: "{{ trigger.payload.host_id }}"
+          host_id: "{{ trigger.payload.source_ip }}"
           source_ip: "{{ trigger.payload.source_ip }}"
           severity: "{{ trigger.payload.severity }}"
           alert_type: "{{ trigger.payload.alert_type }}"
@@ -30,11 +30,10 @@ steps:
         type: "INITIATE_MITIGATION"
         data:
           targetHost: "{{ trigger.payload.source_ip }}"
-          hostId: "{{ trigger.payload.host_id }}"
-          action: "ISOLATE"
+          action: "ISOLATE_VLAN"
           sdn_controller: "opendaylight"
           priority: "high"
-          justification: "Ransomware detected on {{ trigger.payload.host_id }}. Immediate network isolation required."
+          justification: "Ransomware detected on {{ trigger.payload.source_ip }}. Immediate network isolation required."
           source_event_id: "{{ trigger.event_id }}"
           
   - name: "Alert Security Operations Center"
@@ -46,9 +45,9 @@ steps:
           alert_level: "critical"
           incident_type: "ransomware_detection"
           affected_host: "{{ trigger.payload.source_ip }}"
-          host_identifier: "{{ trigger.payload.host_id }}"
+          host_identifier: "{{ trigger.payload.source_ip }}"
           severity: "{{ trigger.payload.severity }}"
           action_taken: "HOST_ISOLATED"
           requires_investigation: true
-          message: "CRITICAL: Ransomware detected on {{ trigger.payload.host_id }} ({{ trigger.payload.source_ip }}). Host has been automatically isolated. Immediate investigation required."
+          message: "CRITICAL: Ransomware detected on {{ trigger.payload.source_ip }}. Host has been automatically isolated. Immediate investigation required."
 
