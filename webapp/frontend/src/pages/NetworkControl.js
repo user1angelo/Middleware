@@ -7,6 +7,7 @@ function NetworkControl() {
     const [error, setError] = useState(null);
     const [selectedHost, setSelectedHost] = useState({ ip: '', mac: '' });
     const [isolateStatus, setIsolateStatus] = useState('');
+    const [removeIsolationStatus, setRemoveIsolationStatus] = useState('');
     const [scanStatus, setScanStatus] = useState('');
     const [startIp, setStartIp] = useState('');
     const [isAutoScan, setIsAutoScan] = useState(false);
@@ -74,6 +75,33 @@ function NetworkControl() {
             }
         } catch (err) {
             setIsolateStatus(`❌ Error: ${err.message}`);
+        }
+    };
+
+    const handleRemoveIsolation = async () => {
+        if (!selectedHost.ip && !selectedHost.mac) {
+            alert('Please enter an IP or MAC address');
+            return;
+        }
+
+        try {
+            setRemoveIsolationStatus('Sending command...');
+            const response = await fetch('http://localhost:3001/api/odl/remove-isolation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(selectedHost),
+            });
+
+            const result = await response.json();
+            if (response.ok) {
+                setRemoveIsolationStatus('✅ Remove isolation command sent successfully!');
+            } else {
+                setRemoveIsolationStatus(`❌ Error: ${result.error}`);
+            }
+        } catch (err) {
+            setRemoveIsolationStatus(`❌ Error: ${err.message}`);
         }
     };
 
@@ -197,12 +225,20 @@ function NetworkControl() {
                                                 <td>{host.ip}</td>
                                                 <td>{host.attachment}</td>
                                                 <td>
-                                                    <button
-                                                        className="btn-danger-outline"
-                                                        onClick={() => setSelectedHost({ ip: host.ip !== 'Unknown' ? host.ip : '', mac: host.mac })}
-                                                    >
-                                                        Select for Isolation
-                                                    </button>
+                                                    <div style={{ display: 'flex', gap: '5px' }}>
+                                                        <button
+                                                            className="btn-danger-outline"
+                                                            onClick={() => setSelectedHost({ ip: host.ip !== 'Unknown' ? host.ip : '', mac: host.mac })}
+                                                        >
+                                                            Isolate
+                                                        </button>
+                                                        <button
+                                                            className="btn-success-outline"
+                                                            onClick={() => setSelectedHost({ ip: host.ip !== 'Unknown' ? host.ip : '', mac: host.mac })}
+                                                        >
+                                                            Unblock
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -247,11 +283,18 @@ function NetworkControl() {
                         />
                     </div>
 
-                    <button onClick={handleIsolate} className="btn-danger" style={{ marginTop: '10px' }}>
-                        🚨 ISOLATE HOST
-                    </button>
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                        <button onClick={handleIsolate} className="btn-danger">
+                            🚨 ISOLATE HOST
+                        </button>
+
+                        <button onClick={handleRemoveIsolation} className="btn-success">
+                            ✅ REMOVE ISOLATION
+                        </button>
+                    </div>
 
                     {isolateStatus && <p style={{ marginTop: '10px', fontWeight: 'bold' }}>{isolateStatus}</p>}
+                    {removeIsolationStatus && <p style={{ marginTop: '10px', fontWeight: 'bold' }}>{removeIsolationStatus}</p>}
                 </section>
             </div>
         </div>

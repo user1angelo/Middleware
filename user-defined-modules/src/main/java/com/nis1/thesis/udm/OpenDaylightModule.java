@@ -70,8 +70,9 @@ public class OpenDaylightModule implements PluggableModule {
         api.subscribeToEvent("odl.topology.discover", this::onTopologyDiscover);
         api.subscribeToEvent("ODL_TOPOLOGY_DISCOVER", this::onTopologyDiscover);
         api.subscribeToEvent("INITIATE_MITIGATION", this::onMitigationCommand);
+        api.subscribeToEvent("REMOVE_MITIGATION", this::onRemoveMitigation);
 
-        helper.log(getName(), "INFO", "Subscribed to INITIATE_MITIGATION & ODL_TOPOLOGY_DISCOVER");
+        helper.log(getName(), "INFO", "Subscribed to INITIATE_MITIGATION, REMOVE_MITIGATION & ODL_TOPOLOGY_DISCOVER");
     }
 
     @Override
@@ -118,6 +119,36 @@ public class OpenDaylightModule implements PluggableModule {
 
         } catch (Exception e) {
             helper.log(getName(), "ERROR", "Error handling mitigation: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Handle Remove Mitigation Requests
+     */
+    private void onRemoveMitigation(Event<?> event) {
+        if (!running)
+            return;
+
+        try {
+            Object data = event.getData();
+            if (!(data instanceof MitigationCommandData)) {
+                return;
+            }
+
+            MitigationCommandData command = (MitigationCommandData) data;
+            String targetHost = command.getTargetHost();
+
+            helper.log(getName(), "INFO", "Received remove mitigation request for " + targetHost);
+
+            boolean success = odlClient.removeIsolation(targetHost);
+            if (success) {
+                helper.log(getName(), "INFO", "Successfully removed isolation from host: " + targetHost);
+            } else {
+                helper.log(getName(), "ERROR", "Failed to remove isolation from host: " + targetHost);
+            }
+
+        } catch (Exception e) {
+            helper.log(getName(), "ERROR", "Error handling remove mitigation: " + e.getMessage());
         }
     }
 

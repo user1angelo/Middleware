@@ -147,6 +147,31 @@ class OdlService {
         return { status: 'sent', command };
     }
 
+    // Publish remove isolation command
+    async removeIsolation(ip, mac) {
+        await this.waitForChannel();
+
+        const command = {
+            message_type: 'workflow_command',
+            event_id: `manual-remove-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            event_type: 'REMOVE_MITIGATION',
+            source_module: 'Webapp',
+            payload: {
+                targetHost: ip,
+                action: 'REMOVE_ISOLATION',
+                priority: 'high',
+                sdn_controller: 'opendaylight',
+                justification: 'Manual removal of isolation via Web Dashboard',
+                mac_address: mac
+            }
+        };
+
+        this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
+        console.log(`📤 Published manual remove isolation command for ${ip || mac}`);
+        return { status: 'sent', command };
+    }
+
     // Publish topology discovery (scan) command
     async triggerNetworkScan(startIp = null) {
         await this.waitForChannel();
