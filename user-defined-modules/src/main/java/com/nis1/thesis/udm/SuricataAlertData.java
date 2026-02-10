@@ -1,5 +1,7 @@
 package com.nis1.thesis.udm;
 
+import com.google.gson.annotations.SerializedName;
+
 /**
  * SuricataAlertData - Comprehensive payload for Suricata NIDS alerts
  * 
