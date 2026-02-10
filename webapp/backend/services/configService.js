@@ -65,7 +65,7 @@ async function getConfig(programKey) {
         defaultContent = [
           '# TCSTester (ThreatContextStore Tester) configuration',
           '# RabbitMQ connection settings used by TCSTester',
-          'rabbitmq.host=192.168.1.8',
+          'rabbitmq.host=localhost',
           'rabbitmq.port=5672',
           'rabbitmq.user=user',
           'rabbitmq.password=password',
