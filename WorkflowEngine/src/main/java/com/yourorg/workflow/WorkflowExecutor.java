@@ -114,24 +114,17 @@ public class WorkflowExecutor {
             command.put("timestamp", ZonedDateTime.now(MANILA_ZONE).format(ISO_FORMATTER));
             command.put("source_module", "WorkflowEngine");
 
-            // Build payload from event data
+            // Build payload from event data with template variable substitution
             JSONObject payload = new JSONObject();
             if (event.getData() != null) {
                 for (Map.Entry<String, Object> entry : event.getData().entrySet()) {
                     String value = entry.getValue().toString();
                     String substituted = substituteTemplateVariables(value, alert);
-
-                    // Map known fields to payload
-                    if (entry.getKey().equals("targetHost")) {
-                        payload.put("ip_address", substituted);
-                    } else if (entry.getKey().equals("hostId")) {
-                        payload.put("host_id", substituted);
-                    } else if (entry.getKey().equals("justification")) {
-                        payload.put("reason", substituted);
-                    } else {
-                        // Pass through other fields
-                        payload.put(entry.getKey(), substituted);
-                    }
+                    
+                    // Pass through all fields with their original names
+                    // This preserves workflow field names (targetHost, justification, etc.)
+                    // which are expected by SDK modules
+                    payload.put(entry.getKey(), substituted);
                 }
             }
             command.put("payload", payload);
