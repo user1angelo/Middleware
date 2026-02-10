@@ -28,10 +28,10 @@ fi
 
 echo ""
 echo "3. Checking PostgreSQL connectivity..."
-if timeout 5 bash -c "cat < /dev/null > /dev/tcp/192.168.86.28/5432" 2>/dev/null; then
-    echo "   ✅ Can connect to PostgreSQL (192.168.86.28:5432)"
+if timeout 5 bash -c "cat < /dev/null > /dev/tcp/localhost/5432" 2>/dev/null; then
+    echo "   ✅ Can connect to PostgreSQL (localhost:5432)"
 else
-    echo "   ❌ CANNOT connect to PostgreSQL (192.168.86.28:5432)"
+    echo "   ❌ CANNOT connect to PostgreSQL (localhost:5432)"
     echo "      Network issue or PostgreSQL is down"
 fi
 

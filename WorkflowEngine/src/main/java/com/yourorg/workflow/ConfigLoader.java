@@ -32,7 +32,7 @@ public class ConfigLoader {
 
     // RabbitMQ configuration
     public static String getRabbitMqHost() {
-        return get("rabbitmq.host", "192.168.86.76");
+        return get("rabbitmq.host", "localhost");
     }
 
     public static int getRabbitMqPort() {

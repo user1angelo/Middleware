@@ -38,7 +38,7 @@ public class ConfigLoader {
      */
     private static void loadDefaults() {
         // Database defaults
-        properties.setProperty("db.host", "192.168.171.145");
+        properties.setProperty("db.host", "localhost");
         properties.setProperty("db.port", "5432");
         properties.setProperty("db.name", "wazuhdb");
         properties.setProperty("db.user", "postgres");
@@ -65,7 +65,7 @@ public class ConfigLoader {
 
     // Database configuration getters
     public static String getDbHost() {
-        return properties.getProperty("db.host", "192.168.171.145");
+        return properties.getProperty("db.host", "localhost");
     }
 
     public static int getDbPort() {

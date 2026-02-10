@@ -32,7 +32,7 @@ public class ConfigLoader {
 
     // Database configuration
     public static String getDbHost() {
-        return get("db.host", "192.168.171.145");
+        return get("db.host", "localhost");
     }
 
     public static int getDbPort() {
@@ -58,7 +58,7 @@ public class ConfigLoader {
 
     // RabbitMQ configuration
     public static String getRabbitMqHost() {
-        return get("rabbitmq.host", "192.168.86.76");
+        return get("rabbitmq.host", "localhost");
     }
 
     public static int getRabbitMqPort() {
