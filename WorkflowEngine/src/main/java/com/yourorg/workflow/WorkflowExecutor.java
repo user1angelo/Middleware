@@ -104,23 +104,14 @@ public class WorkflowExecutor {
             // Construct command message
             JSONObject command = new JSONObject();
 
-            // Determine command type (default)
-            String commandMediaType = "odl." + event.getType().replace("INITIATE_MITIGATION", "host.isolate").toLowerCase();
+            // Use the workflow event type directly as the command type
+            // This must match the module's registered capability (e.g., INITIATE_MITIGATION)
+            String commandType = event.getType();
 
-            // Allow explicit action to override
-            if (event.getData() != null && event.getData().containsKey("action")) {
-                String actionType = event.getData().get("action").toString();
-                if ("ISOLATE_VLAN".equals(actionType)) {
-                    commandMediaType = "odl.host.isolate";
-                }
-            }
-            
-            command.put("event_type", commandMediaType);
+            command.put("event_type", commandType);
             command.put("message_type", "workflow_command");
-
             command.put("event_id", UUID.randomUUID().toString());
             command.put("timestamp", ZonedDateTime.now(MANILA_ZONE).format(ISO_FORMATTER));
-            command.put("event_type", commandMediaType); // Redundant if set above, but ensuring consistency
             command.put("source_module", "WorkflowEngine");
 
             // Build payload from event data
