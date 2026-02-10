@@ -80,6 +80,7 @@ public class WorkflowQueueListener {
                 // Check if alert is ransomware-related
                 if (!isRansomwareAlert(alert)) {
                     System.out.println("⚠️  Not a ransomware alert, skipping workflow processing");
+                    System.out.println("   Values checked: " + alert.toString());
                     channel.basicAck(deliveryTag, false);
                     System.out.println("✅ ACK sent");
                     System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
