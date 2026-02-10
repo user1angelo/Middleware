@@ -5,9 +5,11 @@
   "scripts": {
     "postinstall": "npm run bootstrap",
     "bootstrap": "npm install --prefix webapp/backend && npm install --prefix webapp/frontend",
-    "start": "concurrently \"npm start --prefix webapp/backend\" \"npm start --prefix webapp/frontend\"",
+    "start": "npx concurrently --names backend,frontend,suricata,zeek -c blue,green,yellow,magenta \"npm start --prefix webapp/backend\" \"npm start --prefix webapp/frontend\" \"npm run start:suricata\" \"npm run start:zeek\"",
     "start:backend": "npm start --prefix webapp/backend",
-    "start:frontend": "npm start --prefix webapp/frontend"
+    "start:frontend": "npm start --prefix webapp/frontend",
+    "start:suricata": "cd user-defined-modules && mvn exec:java -Dexec.mainClass=com.nis1.thesis.udm.SuricataModule",
+    "start:zeek": "cd user-defined-modules && mvn exec:java -Dexec.mainClass=com.nis1.thesis.udm.ZeekModule"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

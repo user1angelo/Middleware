@@ -102,12 +102,16 @@ public class ZeekModule {
         loadConfig();
 
         try {
-            // Check if notice.log exists
+            // Wait for notice.log to appear (Zeek may not be running yet)
             if (!Files.exists(Paths.get(NOTICE_LOG_PATH))) {
-                System.err.println("❌ Error: Zeek notice.log not found at: " + NOTICE_LOG_PATH);
-                System.err.println("   Please ensure Zeek is installed and running.");
-                System.err.println("   Or update zeek.notice_log_path in " + CONFIG_PATH);
-                System.exit(1);
+                System.out.println("⏳ Zeek notice.log not found at: " + NOTICE_LOG_PATH);
+                System.out.println("   Waiting for Zeek to start...");
+                while (!Files.exists(Paths.get(NOTICE_LOG_PATH)) && running) {
+                    Thread.sleep(10000); // Retry every 10 seconds
+                }
+                if (!running)
+                    return;
+                System.out.println("✅ Zeek notice.log found! Continuing startup...");
             }
 
             ConnectionFactory factory = new ConnectionFactory();
