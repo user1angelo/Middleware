@@ -206,18 +206,75 @@ public class WorkflowLoader {
         
         // Create action
         Workflow.Action action = new Workflow.Action();
+        // The first "type:" is the action type (e.g., PUBLISH_EVENT)
         action.setType(extractValue(stepContent, "type:"));
         
-        // Create event
+        // Create event - need to find the event section and extract type from WITHIN it
         Workflow.Event event = new Workflow.Event();
-        event.setType(extractValue(stepContent, "type:"));
         
-        // Parse event data (simplified - store as map)
-        Map<String, Object> eventData = new HashMap<>();
-        // In a full implementation, would parse the data: section properly
-        // For now, just mark it as placeholder
-        eventData.put("_placeholder", "Event data parsed from YAML");
-        event.setData(eventData);
+        // Find the "event:" section
+        int eventSectionIndex = stepContent.indexOf("event:");
+        if (eventSectionIndex != -1) {
+            String eventSection = stepContent.substring(eventSectionIndex);
+            
+            // Find "type:" WITHIN the event section (skip past "event:\n")
+            int typeInEvent = eventSection.indexOf("type:");
+            if (typeInEvent != -1) {
+                String fromType = eventSection.substring(typeInEvent + "type:".length());
+                int endOfLine = fromType.indexOf('\n');
+                if (endOfLine == -1) endOfLine = fromType.length();
+                String eventType = fromType.substring(0, endOfLine).trim();
+                // Remove quotes
+                if (eventType.startsWith("\"") && eventType.endsWith("\"")) {
+                    eventType = eventType.substring(1, eventType.length() - 1);
+                }
+                event.setType(eventType);
+            }
+            
+            // Parse event data section
+            Map<String, Object> eventData = new HashMap<>();
+            int dataIndex = eventSection.indexOf("data:");
+            if (dataIndex != -1) {
+                String dataSection = eventSection.substring(dataIndex + "data:".length());
+                String[] dataLines = dataSection.split("\\n");
+                
+                for (String line : dataLines) {
+                    String trimmed = line.trim();
+                    // Stop if we hit a non-indented line (next section)
+                    if (!trimmed.isEmpty() && !line.startsWith(" ") && !line.startsWith("\t") && !trimmed.startsWith("-")) {
+                        break;
+                    }
+                    // Parse key: value pairs
+                    int colonIndex = trimmed.indexOf(':');
+                    if (colonIndex > 0 && colonIndex < trimmed.length() - 1) {
+                        String key = trimmed.substring(0, colonIndex).trim();
+                        String val = trimmed.substring(colonIndex + 1).trim();
+                        // Skip YAML structural keys
+                        if (key.equals("type") || key.equals("event") || key.equals("action") || key.equals("name")) {
+                            continue;
+                        }
+                        // Remove quotes
+                        if (val.startsWith("\"") && val.endsWith("\"")) {
+                            val = val.substring(1, val.length() - 1);
+                        }
+                        if (!key.isEmpty() && !val.isEmpty()) {
+                            eventData.put(key, val);
+                        }
+                    }
+                }
+            }
+            
+            if (eventData.isEmpty()) {
+                eventData.put("_placeholder", "Event data parsed from YAML");
+            }
+            event.setData(eventData);
+        } else {
+            // No event section found
+            event.setType(action.getType());
+            Map<String, Object> eventData = new HashMap<>();
+            eventData.put("_placeholder", "Event data parsed from YAML");
+            event.setData(eventData);
+        }
         
         action.setEvent(event);
         step.setAction(action);
