@@ -5,9 +5,9 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 
 public class DatabaseUtil {
-    private static final String URL = "jdbc:postgresql://localhost:5432/alertsdb";
-    private static final String USER = "alerts_user";
-    private static final String PASSWORD = "alertspass";
+    private static final String URL = ConfigLoader.getDbUrl();
+    private static final String USER = ConfigLoader.getDbUser();
+    private static final String PASSWORD = ConfigLoader.getDbPassword();
 
     static {
         try {
