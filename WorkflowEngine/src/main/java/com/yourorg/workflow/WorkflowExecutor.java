@@ -41,7 +41,7 @@ public class WorkflowExecutor {
                     System.out
                             .println("\n   Step " + (i + 1) + "/" + workflow.getSteps().size() + ": " + step.getName());
 
-                    boolean success = executeStep(step, alert);
+                    boolean success = executeStep(step, alert, channel);
 
                     // Record step execution
                     JSONObject stepResult = new JSONObject();
@@ -70,7 +70,7 @@ public class WorkflowExecutor {
     /**
      * Execute a single workflow step (placeholder implementation)
      */
-    private boolean executeStep(Workflow.Step step, JSONObject alert) {
+    private boolean executeStep(Workflow.Step step, JSONObject alert, Channel channel) {
         try {
             if (step.getAction() == null) {
                 System.out.println("      ⚠️  No action defined");
@@ -103,23 +103,24 @@ public class WorkflowExecutor {
 
             // Construct command message
             JSONObject command = new JSONObject();
-            command.put("message_type",
-                    "odl." + event.getType().replace("INITIATE_MITIGATION", "host.isolate").toLowerCase()); // Default
-                                                                                                            // mapping,
-                                                                                                            // customize
-                                                                                                            // as needed
 
-            // Allow explicit action to override message type
+            // Determine command type (default)
+            String commandMediaType = "odl." + event.getType().replace("INITIATE_MITIGATION", "host.isolate").toLowerCase();
+
+            // Allow explicit action to override
             if (event.getData() != null && event.getData().containsKey("action")) {
                 String actionType = event.getData().get("action").toString();
                 if ("ISOLATE_VLAN".equals(actionType)) {
-                    command.put("message_type", "odl.host.isolate");
+                    commandMediaType = "odl.host.isolate";
                 }
             }
+            
+            command.put("event_type", commandMediaType);
+            command.put("message_type", "workflow_command");
 
             command.put("event_id", UUID.randomUUID().toString());
             command.put("timestamp", ZonedDateTime.now(MANILA_ZONE).format(ISO_FORMATTER));
-            command.put("event_type", "workflow.command");
+            command.put("event_type", commandMediaType); // Redundant if set above, but ensuring consistency
             command.put("source_module", "WorkflowEngine");
 
             // Build payload from event data
@@ -145,7 +146,7 @@ public class WorkflowExecutor {
             command.put("payload", payload);
 
             // Publish to RabbitMQ
-            String queueName = ConfigLoader.getWorkflowQueueName();
+            String queueName = ConfigLoader.getWorkflowResponseQueueName();
             channel.queueDeclare(queueName, true, false, false, null);
             channel.basicPublish("", queueName, null, command.toString().getBytes("UTF-8"));
 
