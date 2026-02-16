@@ -1,10 +1,9 @@
 # Database Configuration
-db.host=192.168.159.68
+db.host=192.168.233.136
 db.port=5432
 db.name=NIS1
 db.user=postgres
 db.password=postgres
-
 # RabbitMQ connection settings
 rabbitmq.host=localhost
 rabbitmq.port=5672
