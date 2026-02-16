@@ -2,6 +2,8 @@
 
 A comprehensive guide for system administrators and developers working with the ThreatContextStore middleware system.
 
+**Environment note:** Some examples in this document use IP addresses or Linux home-directory paths from a specific lab setup. Treat those as placeholders. The authoritative runtime values are read from `ThreatContextStore/config.properties` (or the defaults in `src/main/java/com/yourorg/middleware/ConfigLoader.java`).
+
 ## Table of Contents
 - [Overview](#overview)
 - [Architecture](#architecture)

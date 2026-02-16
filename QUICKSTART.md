@@ -1,232 +1,95 @@
-# ThreatContextStore Quick Start Guide
+# Middleware Quick Start (ThreatContextStore)
 
-## Prerequisites Check
+This quick start is intentionally **environment-agnostic**.
 
-Before starting, ensure:
-- ✅ PostgreSQL is running at `192.168.171.145:5432`
-- ✅ RabbitMQ is running at `192.168.86.76:5672`
-- ✅ Database schema is up-to-date (see below)
-- ✅ Java 17+ is installed
+Instead of hard-coding IPs/ports, it uses the repo’s configuration keys:
+- ThreatContextStore reads `ThreatContextStore/config.properties` (or defaults defined in `ConfigLoader.java`).
+- Queue names and DB connection details are **configurable**.
 
-## First-Time Setup
+## Prerequisites
 
-### 1. Update Database Schema (If Needed)
+- Java 17+
+- PostgreSQL (14+ recommended)
+- RabbitMQ (3.9+ recommended)
 
-Run this on your PostgreSQL server to add missing columns:
+## 1) Configure
 
-```bash
-# Connect to your PostgreSQL server at 192.168.171.145
-ssh user@192.168.171.145
-
-# Run migration
-psql -U postgres -d wazuhdb << EOF
-ALTER TABLE wazuh_alerts ADD COLUMN IF NOT EXISTS response_count INTEGER DEFAULT 0;
-ALTER TABLE wazuh_alerts ADD COLUMN IF NOT EXISTS response_status VARCHAR(50) DEFAULT 'pending';
-EOF
-```
-
-### 2. Verify Compilation
+From the repo root:
 
 ```bash
-cd ~/Documents/GitHub/Middleware/ThreatContextStore
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+cd ThreatContextStore
+cp config.properties.example config.properties
 ```
 
-## Running the System
+Edit `ThreatContextStore/config.properties` and set at minimum:
+- `db.host`, `db.port`, `db.name`, `db.user`, `db.password`
+- `rabbitmq.host`, `rabbitmq.port`, `rabbitmq.user`, `rabbitmq.password`
+- `rabbitmq.queue.name` (default: `alerts_queue`)
+- `rabbitmq.query_response_queue.name` (default: `query_response_queue`)
 
-### Start ThreatContextStore (Terminal 1)
+## 2) Ensure DB schema is up-to-date
+
+Run the base schema once:
 
 ```bash
-cd ~/Documents/GitHub/Middleware/ThreatContextStore
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+cd ThreatContextStore
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f schema.sql
 ```
 
-You should see:
-```
-🚀 Starting ThreatContextStore Main Application
-================================================
-📡 Starting RabbitMQ Listener thread...
-👁️  Starting File Watcher AlertProcessor thread...
-✅ Connected to RabbitMQ at 192.168.86.76
-⏳ Waiting for messages from queue: alerts_queue
-```
-
-**Keep this running!** This is your main application.
-
----
-
-## Testing with TCSTester
-
-### Send 10 Test Alerts (Terminal 2)
+If you see errors about missing `response_count` / `response_status`, run the migration:
 
 ```bash
-cd ~/Documents/GitHub/Middleware/ThreatContextStoreTester
-java -cp ".:../ThreatContextStore/lib/*" TCSTester
+cd ThreatContextStore
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f migration_add_query_columns.sql
 ```
 
-Then:
-1. Choose option: **1** (Send random alerts)
-2. Choose option: **2** (Send fixed 10)
+## 3) Compile
 
-Watch Terminal 1 - you should see:
-```
-🔥 Stored alert: abc-123... | Severity: high
-🔥 Stored alert: def-456... | Severity: medium
-...
-```
-
-### Query Alerts (Terminal 2)
+ThreatContextStore is `javac`-based.
 
 ```bash
-cd ~/Documents/GitHub/Middleware/ThreatContextStoreTester
-java -cp ".:../ThreatContextStore/lib/*" TCSTester
+cd ThreatContextStore
+
+# Windows (PowerShell/cmd)
+javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
+
+# Linux/macOS
+# javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
 ```
 
-Then:
-1. Choose option: **2** (Query alerts)
-2. Enter filter field: **severity**
-3. Enter filter value: **high**
-4. Add another filter?: **n**
-5. Order by field: *[press Enter for default]*
-6. Order direction: *[press Enter for default]*
-7. Limit: **10** *[or press Enter]*
+## 4) Run
 
-Watch Terminal 1 - you should see:
-```
-🔍 Processing query: query-xyz-789...
-   SQL: SELECT * FROM wazuh_alerts WHERE payload->>'severity' = ? ORDER BY timestamp DESC LIMIT 10
-   Found 5 results
-✅ Sent 5 query responses
-```
-
-### Verify Query Responses
+Start ThreatContextStore (runs the RabbitMQ listener + file-watcher sender in one process):
 
 ```bash
-# Check the query_responses directory
-ls -la ~/Documents/GitHub/Middleware/ThreatContextStore/query_responses/
+cd ThreatContextStore
 
-# View a response file
-cat ~/Documents/GitHub/Middleware/ThreatContextStore/query_responses/<some-event-id>.json
+# Windows
+java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+
+# Linux/macOS
+# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 ```
 
----
+You should see it connect using your configured values and begin waiting for messages from `rabbitmq.queue.name`.
 
-## Quick Verification Commands
+## 5) Test (optional)
 
-### Check Database
+If you want to generate synthetic alerts/queries, use the tester:
 
 ```bash
-# From any machine with PostgreSQL client
-psql -h 192.168.171.145 -U postgres -d wazuhdb -c "
-SELECT 
-    message_type, 
-    COUNT(*) as count 
-FROM wazuh_alerts 
-GROUP BY message_type;
-"
+cd ThreatContextStoreTester
+
+# Windows
+java -cp ".;../ThreatContextStore/lib/*" TCSTester
+
+# Linux/macOS
+# java -cp ".:../ThreatContextStore/lib/*" TCSTester
 ```
 
-Expected output:
-```
- message_type | count 
---------------+-------
- alert        |    10
- query        |     1
-```
+Query responses are written by ThreatContextStore to `ThreatContextStore/query_responses/`.
 
-### Check RabbitMQ Queues
+## Stopping
 
-```bash
-# If you have rabbitmqadmin installed
-rabbitmqadmin -H 192.168.86.76 -u guest -p guest list queues
-
-# Or via web UI
-# Open: http://192.168.86.76:15672
-# Login: guest/guest
-```
-
----
-
-## Common Issues
-
-### Issue: "Column response_count does not exist"
-
-**Solution:** Run the database migration (see First-Time Setup above)
-
-### Issue: Only 4 out of 10 messages processed
-
-**Solution:** This was fixed! Make sure you recompiled RabbitMQListener.java with the latest changes.
-
-### Issue: Timestamps are in UTC instead of Manila time
-
-**Solution:** Recompile TCSTester with the latest changes:
-```bash
-cd ~/Documents/GitHub/Middleware/ThreatContextStoreTester
-javac -cp "../ThreatContextStore/lib/*" TCSTester.java
-```
-
-### Issue: Can't find query responses
-
-**Solution:** Check the correct location:
-```bash
-ls -la ~/Documents/GitHub/Middleware/ThreatContextStore/query_responses/
-```
-
-NOT in `ThreatContextStoreTester/query_responses/` (that's just a placeholder)
-
----
-
-## Understanding the Message Flow
-
-```
-TCSTester → RabbitMQ (alerts_queue) → RabbitMQListener → PostgreSQL
-                                              ↓
-                                    (for queries only)
-                                              ↓
-                                       Execute Query
-                                              ↓
-                                   ┌──────────┴──────────┐
-                                   ↓                     ↓
-                        query_response_queue    query_responses/
-                          (RabbitMQ)            (JSON files)
-```
-
----
-
-## Stopping the System
-
-1. In Terminal 1 (ThreatContextStore): Press **CTRL+C**
-   - You should see: `🛑 Shutdown signal received...`
-   - Then: `✅ ThreatContextStore stopped gracefully`
-
-2. TCSTester exits automatically after each operation
-
----
-
-## Next Steps
-
-- Try querying with multiple filters
-- Try continuous alert sending (option 1 → 3)
-- Check the database to see stored alerts
-- Monitor RabbitMQ queue depth during load testing
-
----
-
-## Quick Reference: All Commands
-
-```bash
-# Start ThreatContextStore
-cd ~/Documents/GitHub/Middleware/ThreatContextStore
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
-
-# Run TCSTester
-cd ~/Documents/GitHub/Middleware/ThreatContextStoreTester
-java -cp ".:../ThreatContextStore/lib/*" TCSTester
-
-# Check query responses
-ls -la ~/Documents/GitHub/Middleware/ThreatContextStore/query_responses/
-
-# Query database
-psql -h 192.168.171.145 -U postgres -d wazuhdb -c "SELECT COUNT(*) FROM wazuh_alerts;"
-```
+Press **CTRL+C** in the ThreatContextStore terminal; it performs a graceful shutdown.
 

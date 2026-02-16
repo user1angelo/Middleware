@@ -12,7 +12,8 @@ The most common issue is missing database columns. Verify your schema:
 
 ```bash
 # Connect to PostgreSQL
-psql -h 192.168.171.145 -U postgres -d wazuhdb
+# psql -h 192.168.171.145 -U postgres -d wazuhdb
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME>
 
 # Check table structure
 \d wazuh_alerts
@@ -30,10 +31,8 @@ psql -h 192.168.171.145 -U postgres -d wazuhdb
 
 **If missing, run migration:**
 ```bash
-psql -h 192.168.86.28 -U postgres -d wazuhdb << EOF
-ALTER TABLE wazuh_alerts ADD COLUMN IF NOT EXISTS response_count INTEGER DEFAULT 0;
-ALTER TABLE wazuh_alerts ADD COLUMN IF NOT EXISTS response_status VARCHAR(50) DEFAULT 'pending';
-EOF
+cd ThreatContextStore
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f migration_add_query_columns.sql
 ```
 
 ---
@@ -45,8 +44,13 @@ The new logging shows **every single message** with full details.
 ### Start ThreatContextStore with logging:
 
 ```bash
-cd ~/Documents/GitHub/Middleware/ThreatContextStore
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
+cd ThreatContextStore
+
+# Windows: use PowerShell redirection to capture output
+java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
+
+# Linux/macOS
+# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
 ```
 
 This saves all output (including errors) to `logs.txt` for review.
@@ -95,8 +99,12 @@ Exception type: org.postgresql.util.PSQLException
 Use the diagnostic script:
 
 ```bash
-cd ~/Documents/GitHub/Middleware
-./check_queue_status.sh
+cd .
+
+# If you have bash available (WSL / Git Bash):
+# ./check_queue_status.sh
+
+# Otherwise, use RabbitMQ Management UI or HTTP API (see below).
 ```
 
 **Expected output:**
@@ -128,7 +136,7 @@ Compare what was sent vs. what was stored:
 
 ```bash
 # Check total messages stored
-psql -h 192.168.86.28 -U postgres -d wazuhdb -c "
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -c "
 SELECT 
     message_type, 
     COUNT(*) as count 
@@ -206,13 +214,19 @@ If count is less than expected, check logs for exceptions.
 **Solution:**
 ```bash
 # Verify ThreatContextStore is running
-ps aux | grep ThreatContextStore
+
+# Windows (PowerShell)
+Get-Process | Where-Object { $_.ProcessName -like '*java*' }
+
+# Linux/macOS
+# ps aux | grep ThreatContextStore
 
 # Check network connectivity
-ping 192.168.86.76
+ping <RABBITMQ_HOST>
 
 # Verify queue name
-grep rabbitmq.queue.name ThreatContextStore/config.properties
+# (Any OS)
+findstr rabbitmq.queue.name ThreatContextStore\config.properties
 ```
 
 ---
@@ -255,8 +269,8 @@ redelivered=true   ← This is a retry
 Use this checklist to systematically debug:
 
 - [ ] Database schema has `response_count` and `response_status` columns
-- [ ] ThreatContextStore is running (check with `ps aux`)
-- [ ] RabbitMQ is accessible (check with `ping 192.168.86.76`)
+- [ ] ThreatContextStore is running (check your running `java` process)
+- [ ] RabbitMQ is accessible (check with `ping <RABBITMQ_HOST>`)
 - [ ] Active consumers = 1 (check with `./check_queue_status.sh`)
 - [ ] No messages stuck in "Ready" state
 - [ ] No messages stuck in "Unacknowledged" state
@@ -272,20 +286,34 @@ Send messages and watch logs in real-time:
 
 ### Terminal 1: Start ThreatContextStore
 ```bash
-cd ~/Documents/GitHub/Middleware/ThreatContextStore
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+cd ThreatContextStore
+
+# Windows
+java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+
+# Linux/macOS
+# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 ```
 
 ### Terminal 2: Send test messages
 ```bash
-cd ~/Documents/GitHub/Middleware/ThreatContextStoreTester
-java -cp ".:../ThreatContextStore/lib/*" TCSTester
+cd ThreatContextStoreTester
+
+# Windows
+java -cp ".;../ThreatContextStore/lib/*" TCSTester
+
+# Linux/macOS
+# java -cp ".:../ThreatContextStore/lib/*" TCSTester
 # Choose: 1 → 2 (send 10 alerts)
 ```
 
 ### Terminal 3: Watch database in real-time
 ```bash
-watch -n 1 'psql -h 192.168.86.28 -U postgres -d wazuhdb -c "SELECT COUNT(*) FROM wazuh_alerts WHERE message_type='\''alert'\'';"'
+# Linux/macOS
+# watch -n 1 'psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -c "SELECT COUNT(*) FROM wazuh_alerts WHERE message_type='\''alert'\'';"'
+
+# Windows (PowerShell)
+# while ($true) { psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -c "SELECT COUNT(*) FROM wazuh_alerts WHERE message_type='alert';"; Start-Sleep -Seconds 1; Clear-Host }
 ```
 
 **Expected behavior:**
@@ -313,6 +341,13 @@ grep "✅ ACK sent" logs.txt | wc -l
 grep "NACK sent" logs.txt | wc -l
 ```
 
+On Windows, you can use PowerShell equivalents, for example:
+```powershell
+Select-String -Path logs.txt -Pattern "EXCEPTION" | Select-Object -First 20
+Select-String -Path logs.txt -Pattern "redelivered=true" | Measure-Object | Select-Object Count
+Select-String -Path logs.txt -Pattern "✅ ACK sent" | Measure-Object | Select-Object Count
+```
+
 ---
 
 ## Quick Fix: Reset Everything
@@ -324,21 +359,32 @@ If all else fails, reset the system:
 # Press CTRL+C in the terminal running it
 
 # 2. Purge RabbitMQ queue (CAUTION: deletes all queued messages)
-curl -u guest:guest -X DELETE http://192.168.86.76:15672/api/queues/%2F/alerts_queue/contents
+curl -u <RABBITMQ_USER>:<RABBITMQ_PASSWORD> -X DELETE http://<RABBITMQ_HOST>:15672/api/queues/%2F/<ALERTS_QUEUE>/contents
 
 # 3. Clear database (CAUTION: deletes all data)
-psql -h 192.168.86.28 -U postgres -d wazuhdb -c "TRUNCATE TABLE wazuh_alerts;"
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -c "TRUNCATE TABLE wazuh_alerts;"
 
 # 4. Run migration
-psql -h 192.168.86.28 -U postgres -d wazuhdb -f ThreatContextStore/migration_add_query_columns.sql
+cd ThreatContextStore
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f migration_add_query_columns.sql
 
 # 5. Restart ThreatContextStore
 cd ThreatContextStore
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+
+# Windows
+java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+
+# Linux/macOS
+# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 
 # 6. Test with 5 messages first
 cd ../ThreatContextStoreTester
-java -cp ".:../ThreatContextStore/lib/*" TCSTester
+
+# Windows
+java -cp ".;../ThreatContextStore/lib/*" TCSTester
+
+# Linux/macOS
+# java -cp ".:../ThreatContextStore/lib/*" TCSTester
 # Choose: 1 → 1 → 5
 ```
 
@@ -350,7 +396,13 @@ If you've tried all the steps above and still have issues:
 
 1. **Capture full logs:**
    ```bash
-   java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee full_debug.log
+   cd ThreatContextStore
+
+   # Windows (PowerShell)
+   java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath full_debug.log
+
+   # Linux/macOS
+   # java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee full_debug.log
    ```
 
 2. **Check the logs for:**

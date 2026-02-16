@@ -44,7 +44,7 @@ graph TD
 
 - **[Quick Start Guide](QUICKSTART.md)**: fast track to getting the system up and running.
 - **[Workflow Engine Guide](WorkflowEngine/WORKFLOW_ENGINE_COMPLETE.md)**: Detailed documentation on creating custom workflows and the engine internals.
-- **[Threat Context Store Guide](WARP.md)**: Deep dive into the storage and query system.
+- **[Threat Context Store Guide](ThreatContextStore/ThreatContextStoreGuide.md)**: Deep dive into the storage and query system.
 - **[Web Dashboard Guide](webapp/README.md)**: Instructions for running the frontend.
 - **[Troubleshooting](DEBUGGING.md)**: Common issues and solutions.
 
@@ -65,13 +65,15 @@ graph TD
 cd nis-thesis-sdk
 mvn clean install
 
-# 2. Build ThreatContextStore
+# 2. Build ThreatContextStore (javac-based)
 cd ../ThreatContextStore
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+# Linux/macOS: use ':' as classpath separator
+# Windows: use ';' as classpath separator
+javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
 
-# 3. Build WorkflowEngine
+# 3. Build WorkflowEngine (javac-based)
 cd ../WorkflowEngine
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/workflow/*.java
+javac -cp "lib/*;out" -d out src/main/java/com/yourorg/workflow/*.java
 
 # 4. Build Enforcer
 cd ../user-defined-modules/odl-network-enforcer

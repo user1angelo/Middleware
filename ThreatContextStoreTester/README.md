@@ -14,8 +14,10 @@ Interactive testing tool for ThreatContextStore that sends random alerts and que
 ## Prerequisites
 
 - Java 17+
-- RabbitMQ running at `192.168.86.76:5672`
+- RabbitMQ reachable at the host/port configured for your environment
 - JAR files from ThreatContextStore `/lib` directory
+
+**Note:** ThreatContextStore’s RabbitMQ connection settings are read from `ThreatContextStore/config.properties` (or defaults in `ThreatContextStore/src/main/java/com/yourorg/middleware/ConfigLoader.java`).
 
 ## Compile
 
@@ -27,7 +29,11 @@ javac -cp "../ThreatContextStore/lib/*" TCSTester.java
 ## Run
 
 ```bash
-java -cp ".:../ThreatContextStore/lib/*" TCSTester
+# Windows
+java -cp ".;../ThreatContextStore/lib/*" TCSTester
+
+# Linux/macOS
+# java -cp ".:../ThreatContextStore/lib/*" TCSTester
 ```
 
 ## Usage Examples

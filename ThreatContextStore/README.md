@@ -1,86 +1,73 @@
-# Middleware with PostgreSQL
+# ThreatContextStore
 
-## Why PostgreSQL? 
+ThreatContextStore ingests messages from RabbitMQ and stores alert/query data in PostgreSQL.
 
-- **Open-source & free:** No licensing costs, unlike some commercial databases.  
-- **Reliability & maturity:** Proven in production at large-scale systems.  
-- **JSON/UUID support:** Perfect for storing flexible alert data with unique identifiers.  
-- **Strong SQL & indexing:** Powerful queries, indexing, and transactional guarantees.  
-- **Good Java integration:** JDBC support makes it easy to connect from Java apps.  
+## What it does
 
-**Why not other database?**  
-- Some databases (e.g., MySQL) have weaker JSON handling.  
-- NoSQL options (MongoDB, Couchbase) lack strong ACID guarantees for transactional alerts.  
-- Lightweight DBs (SQLite) may struggle with concurrent writes and scaling.
+- Consumes `alert` and `query` messages from `rabbitmq.queue.name` (default: `alerts_queue`)
+- Stores alerts/queries in PostgreSQL (table: `wazuh_alerts`)
+- For `query` messages, executes the translated SQL and:
+  - publishes individual results to `rabbitmq.query_response_queue.name` (default: `query_response_queue`)
+  - writes result files to `query_responses/`
+- `query_response` messages are logged (not stored)
 
+## Prerequisites
 
----
+- Java 17+
+- PostgreSQL (14+ recommended)
+- RabbitMQ (3.9+ recommended)
+- JAR dependencies already included under `lib/`
 
-## Requirements
-- **Java 17+** installed  
-- **PostgreSQL 17** installed  
-- **PostgreSQL JDBC Driver** (`postgresql-42.7.7.jar`)  
+## Configure
 
-Download JDBC driver:  
-👉 https://jdbc.postgresql.org/download.html  
+Create a local config:
 
-Place it inside the `lib/` folder of this project.  
-
----
-
-## Step 1: Install PostgreSQL
-1. Download installer:  
-   👉 [EnterpriseDB PostgreSQL Installer](https://www.enterprisedb.com/downloads/postgres-postgresql-downloads)
-
-2. During installation:  
-   - Choose **PostgreSQL Server**  
-   - Port: `5432` (default)  
-   - Superuser: `postgres`  
-   - Password: (choose your password, e.g. `postgres`)  
-
-3. Once installed, open **pgAdmin 4** or `psql`.  
-
----
-
-## Step 2: Setup Database and Schema
-1. Create the database and user:
-
-```sql
-CREATE DATABASE alertsdb;
-CREATE USER alerts_user WITH PASSWORD 'alertspass';
-GRANT ALL PRIVILEGES ON DATABASE alertsdb TO alerts_user;
+```bash
+cp config.properties.example config.properties
 ```
 
-2. Run the schema file (`schema.sql`) inside `alertsdb`:
+Edit `config.properties` to match your environment. If `config.properties` is missing, defaults in `src/main/java/com/yourorg/middleware/ConfigLoader.java` are used.
 
-```sql
-\c alertsdb
-\i schema.sql
+## Database setup
+
+Create the schema:
+
+```bash
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f schema.sql
 ```
 
----
+If needed, apply the migration for query tracking columns:
 
-## Step 3: Compile Middleware
-```sh
-javac -cp "lib/*" -d out src/main/java/com/yourorg/middleware/*.java
+```bash
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f migration_add_query_columns.sql
 ```
 
----
+## Build (javac)
 
-## Step 4: Run Sender (Insert Alerts)
-```sh
-java -cp "out;lib/*" com.yourorg.middleware.Sender
+From this directory:
+
+```bash
+# Windows
+javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
+
+# Linux/macOS
+# javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
 ```
 
-This will insert all alerts from `messages/` folder into PostgreSQL.
+## Run
 
----
+Start the main entrypoint (listener + file watcher):
 
-## Step 5: Run QueryDemo (Export Alerts)
-```sh
-java -cp "out;lib/*" com.yourorg.middleware.QueryDemo high
+```bash
+# Windows
+java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+
+# Linux/macOS
+# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 ```
 
-This will export all alerts with severity = `high` into the `output/` folder as JSON files.
+## Test
 
----
+Use the tester in `../ThreatContextStoreTester/` to publish synthetic alerts and queries.
+
+Query response files will appear in `query_responses/`.

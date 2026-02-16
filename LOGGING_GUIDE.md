@@ -4,6 +4,10 @@
 
 ThreatContextStore now has **comprehensive logging** that shows exactly what happens to every single message. This helps debug issues like "only 3 out of 10 messages were processed."
 
+**Note on hosts/paths:** Wherever you see an IP address or a `~/Documents/...` path in older examples, treat it as an environment-specific placeholder. The authoritative values are:
+- `ThreatContextStore/config.properties` (or the defaults in `ThreatContextStore/src/main/java/com/yourorg/middleware/ConfigLoader.java`)
+- Your local repo path
+
 ---
 
 ## What Gets Logged
@@ -227,7 +231,7 @@ Total: More than 10 log entries (includes retries)
 📨 Message #4 received (redelivered=true) → ❌ EXCEPTION → 🗑️ Discarded
 ```
 **Status:** ❌ Database schema needs migration
-**Fix:** Run `migration_add_query_columns.sql`
+**Fix:** Run `ThreatContextStore/migration_add_query_columns.sql`
 
 ---
 
@@ -327,15 +331,16 @@ This means:
 
 1. **Check if listener is connected:**
    ```bash
-   cd ~/Documents/GitHub/Middleware
-   ./check_queue_status.sh
+   # If you have bash available (WSL / Git Bash):
+   # ./check_queue_status.sh
+   # Otherwise, use RabbitMQ Management UI / API.
    ```
    
 2. **Verify Active consumers = 1**
 
 3. **Check RabbitMQ connectivity:**
    ```bash
-   ping 192.168.86.76
+   ping <RABBITMQ_HOST>
    ```
 
 ---
@@ -344,17 +349,32 @@ This means:
 
 ### Save logs to file:
 ```bash
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
+# Windows (PowerShell)
+cd ThreatContextStore
+java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
+
+# Linux/macOS
+# cd ThreatContextStore
+# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
 ```
 
 ### Save only errors:
 ```bash
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee >(grep -E "❌|⚠️" > errors.txt)
+# Linux/macOS (bash process substitution)
+# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee >(grep -E "❌|⚠️" > errors.txt)
+
+# Windows (PowerShell)
+# java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
+# Select-String -Path logs.txt -Pattern "❌","⚠️" | Set-Content errors.txt
 ```
 
 ### Watch logs in real-time:
 ```bash
-tail -f logs.txt
+# Windows (PowerShell)
+Get-Content -Path logs.txt -Wait
+
+# Linux/macOS
+# tail -f logs.txt
 ```
 
 ---
@@ -390,13 +410,23 @@ The enhanced logging adds:
 1. **Start ThreatContextStore with logging:**
    ```bash
    cd ThreatContextStore
-   java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
+
+   # Windows (PowerShell)
+   java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
+
+   # Linux/macOS
+   # java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
    ```
 
 2. **Send test messages:**
    ```bash
    cd ThreatContextStoreTester
-   java -cp ".:../ThreatContextStore/lib/*" TCSTester
+   
+   # Windows
+   java -cp ".;../ThreatContextStore/lib/*" TCSTester
+
+   # Linux/macOS
+   # java -cp ".:../ThreatContextStore/lib/*" TCSTester
    ```
 
 3. **Review logs:**

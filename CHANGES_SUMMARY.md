@@ -1,5 +1,7 @@
 # Recent Changes Summary
 
+**Note:** Any IP addresses / hostnames mentioned in historical notes are environment-specific examples. The current runtime values should be taken from each component’s `config.properties` (or the defaults in its `ConfigLoader`).
+
 ## Date: October 7, 2025
 
 ### 1. Fixed RabbitMQListener Message Processing Issue
@@ -83,8 +85,9 @@ After:  2025-10-07T12:59:29+08:00 (Manila, GMT+8)
 If you haven't already, run this migration to add missing columns:
 
 ```bash
-# On PostgreSQL server (192.168.86.28)
-psql -U postgres -d wazuhdb -f ThreatContextStore/migration_add_query_columns.sql
+# On your PostgreSQL server
+cd ThreatContextStore
+psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f migration_add_query_columns.sql
 ```
 
 Or manually:

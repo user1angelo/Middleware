@@ -52,19 +52,21 @@ Middleware/
 ### Configuration Options
 
 **Database Configuration:**
-- `db.host` - PostgreSQL server hostname (default: `192.168.86.28`)
+- `db.host` - PostgreSQL server hostname (default: `localhost`)
 - `db.port` - PostgreSQL port (default: `5432`)
 - `db.name` - Database name (default: `wazuhdb`)
 - `db.user` - Database username (default: `postgres`)
 - `db.password` - Database password (default: `postgres`)
 
 **RabbitMQ Configuration:**
-- `rabbitmq.host` - RabbitMQ server hostname (default: `192.168.86.76`)
+- `rabbitmq.host` - RabbitMQ server hostname (default: `localhost`)
 - `rabbitmq.port` - RabbitMQ port (default: `5672`)
-- `rabbitmq.user` - RabbitMQ username (default: `guest`)
-- `rabbitmq.password` - RabbitMQ password (default: `guest`)
+- `rabbitmq.user` - RabbitMQ username (default: `user`)
+- `rabbitmq.password` - RabbitMQ password (default: `password`)
 - `rabbitmq.queue.name` - Main queue for alerts/queries (default: `alerts_queue`)
 - `rabbitmq.query_response_queue.name` - Queue for query responses (default: `query_response_queue`)
+
+**Note:** Some repo docs may contain IP addresses from a specific lab setup. Treat those as examples and prefer the values in your local `ThreatContextStore/config.properties`.
 
 **File Paths:**
 - `paths.messages` - Directory for input JSON files (default: `messages`)
