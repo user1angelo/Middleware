@@ -139,6 +139,26 @@ public class WorkflowQueueListener {
                 }
                 
                 // Acknowledge message
+                long processingEndTime = System.currentTimeMillis();
+                long processingTimeStr = processingEndTime - System.currentTimeMillis(); // Just for delta, but we want Total Turnaround Time
+
+                // Calculate Total Containment Time if timestamp is available
+                if (alert.has("timestamp")) {
+                    try {
+                        String alertTimeStr = alert.getString("timestamp");
+                        java.time.Instant alertTime = java.time.Instant.parse(alertTimeStr);
+                        long alertTimeMillis = alertTime.toEpochMilli();
+                        long totalContainmentTime = processingEndTime - alertTimeMillis;
+                        
+                        System.out.println("⏱️  Containment Performance Metrics:");
+                        System.out.println("   - Alert Generation: " + alertTimeStr);
+                        System.out.println("   - Action Executed:  " + java.time.Instant.now().toString());
+                        System.out.println("   - TOTAL TIME:       " + totalContainmentTime + " ms");
+                    } catch (Exception e) {
+                        System.out.println("⚠️  Could not calculate total time: " + e.getMessage());
+                    }
+                }
+
                 channel.basicAck(deliveryTag, false);
                 System.out.println("\n✅ ACK sent for alert #" + messageCounter);
                 System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
