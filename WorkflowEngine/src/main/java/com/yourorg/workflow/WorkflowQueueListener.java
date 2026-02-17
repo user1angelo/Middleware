@@ -47,6 +47,10 @@ public class WorkflowQueueListener {
         channel.basicQos(10);
         
         System.out.println("✅ Connected to RabbitMQ at " + RABBITMQ_HOST);
+        
+        // Execute startup workflows BEFORE listening for alerts
+        executeStartupWorkflows();
+        
         System.out.println("⏳ Waiting for alerts from queue: " + WORKFLOW_QUEUE);
         System.out.println("   Press CTRL+C to exit.\n");
         
@@ -222,6 +226,59 @@ public class WorkflowQueueListener {
         } catch (InterruptedException e) {
             System.out.println("Listener interrupted, shutting down...");
             shutdown();
+        }
+    }
+    
+    /**
+     * Execute startup workflows (proactive policies)
+     * These run once when the system starts, before processing alerts
+     */
+    private void executeStartupWorkflows() {
+        try {
+            System.out.println("\n🚀 Executing startup workflows...");
+            System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            
+            // Load all workflows
+            String workflowsDir = ConfigLoader.getWorkflowsDirectory();
+            List<Workflow> allWorkflows = workflowLoader.loadAndCacheWorkflows(workflowsDir);
+            
+            // Filter for startup workflows
+            List<Workflow> startupWorkflows = workflowLoader.getWorkflowsByTriggerType("system.startup");
+            
+            if (startupWorkflows.isEmpty()) {
+                System.out.println("📭 No startup workflows found (trigger: system.startup)");
+                System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+                return;
+            }
+            
+            System.out.println("✅ Found " + startupWorkflows.size() + " startup workflow(s)");
+            
+            // Create synthetic startup event
+            JSONObject startupEvent = new JSONObject();
+            startupEvent.put("event_type", "system.startup");
+            startupEvent.put("event_id", java.util.UUID.randomUUID().toString());
+            startupEvent.put("timestamp", java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Manila"))
+                .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+            startupEvent.put("message_type", "system_event");
+            startupEvent.put("source_module", "WorkflowEngine");
+            
+            JSONObject payload = new JSONObject();
+            payload.put("event_name", "system_startup");
+            payload.put("description", "System startup - executing proactive policies");
+            startupEvent.put("payload", payload);
+            
+            // Execute each startup workflow
+            for (Workflow workflow : startupWorkflows) {
+                System.out.println("\n   Running: " + workflow.getName());
+                workflowExecutor.executeWorkflow(workflow, startupEvent, channel);
+            }
+            
+            System.out.println("\n✅ Startup workflows completed");
+            System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error executing startup workflows: " + e.getMessage());
+            e.printStackTrace();
         }
     }
     

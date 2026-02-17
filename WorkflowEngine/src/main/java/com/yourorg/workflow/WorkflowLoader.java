@@ -293,5 +293,33 @@ public class WorkflowLoader {
         }
         return null;
     }
+    
+    /**
+     * Get workflows filtered by trigger event type
+     * Used for startup workflows (system.startup) vs alert-triggered workflows
+     */
+    public List<Workflow> getWorkflowsByTriggerType(String eventType) {
+        List<Workflow> matching = new ArrayList<>();
+        
+        for (Workflow workflow : loadedWorkflows) {
+            if (workflow.getTrigger() != null && 
+                eventType.equals(workflow.getTrigger().getEventType())) {
+                matching.add(workflow);
+            }
+        }
+        
+        return matching;
+    }
+    
+    // Cache loaded workflows for filtering
+    private List<Workflow> loadedWorkflows = new ArrayList<>();
+    
+    /**
+     * Load workflows and cache them for filtering
+     */
+    public List<Workflow> loadAndCacheWorkflows(String directory) {
+        loadedWorkflows = loadWorkflows(directory);
+        return loadedWorkflows;
+    }
 }
 

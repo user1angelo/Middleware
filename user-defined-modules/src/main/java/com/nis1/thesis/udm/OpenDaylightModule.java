@@ -71,8 +71,10 @@ public class OpenDaylightModule implements PluggableModule {
         api.subscribeToEvent("ODL_TOPOLOGY_DISCOVER", this::onTopologyDiscover);
         api.subscribeToEvent("INITIATE_MITIGATION", this::onMitigationCommand);
         api.subscribeToEvent("REMOVE_MITIGATION", this::onRemoveMitigation);
+        api.subscribeToEvent("INSTALL_PROACTIVE_POLICY", this::onInstallProactivePolicy);
 
-        helper.log(getName(), "INFO", "Subscribed to INITIATE_MITIGATION, REMOVE_MITIGATION & ODL_TOPOLOGY_DISCOVER");
+        helper.log(getName(), "INFO",
+                "Subscribed to INITIATE_MITIGATION, REMOVE_MITIGATION, INSTALL_PROACTIVE_POLICY & ODL_TOPOLOGY_DISCOVER");
     }
 
     @Override
@@ -241,6 +243,158 @@ public class OpenDaylightModule implements PluggableModule {
     public Map<String, String> manualScanNetwork(String startIp) {
         helper.log(getName(), "INFO", "Manual network scan triggered");
         return scanner.scanNetwork(startIp);
+    }
+
+    /**
+     * Handle Proactive Policy Installation (from startup workflows)
+     */
+    private void onInstallProactivePolicy(Event<?> event) {
+        if (!running)
+            return;
+
+        try {
+            Object data = event.getData();
+            if (data == null) {
+                helper.log(getName(), "WARN", "Proactive policy event has no data");
+                return;
+            }
+
+            // Convert data to JSONObject for easier parsing
+            JSONObject policyData;
+            if (data instanceof JSONObject) {
+                policyData = (JSONObject) data;
+            } else if (data instanceof Map) {
+                policyData = new JSONObject((Map<?, ?>) data);
+            } else {
+                helper.log(getName(), "WARN", "Unexpected policy data type: " + data.getClass().getName());
+                return;
+            }
+
+            String policyName = policyData.optString("policy_name", "unknown");
+            String policyType = policyData.optString("policy_type", "unknown");
+
+            helper.log(getName(), "INFO", "Installing proactive policy: " + policyName + " (type: " + policyType + ")");
+
+            // Route to appropriate policy installer based on type
+            boolean success = false;
+            switch (policyType) {
+                case "microsegmentation":
+                    success = installMicrosegmentationPolicy(policyData);
+                    break;
+                case "rate_limiting":
+                    success = installRateLimitingPolicy(policyData);
+                    break;
+                case "port_security":
+                    success = installPortSecurityPolicy(policyData);
+                    break;
+                default:
+                    helper.log(getName(), "WARN", "Unknown policy type: " + policyType);
+                    return;
+            }
+
+            if (success) {
+                helper.log(getName(), "INFO", "✅ Successfully installed proactive policy: " + policyName);
+            } else {
+                helper.log(getName(), "ERROR", "❌ Failed to install proactive policy: " + policyName);
+            }
+
+        } catch (Exception e) {
+            helper.log(getName(), "ERROR", "Error installing proactive policy: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Install microsegmentation policy (default-deny SMB with exceptions)
+     */
+    private boolean installMicrosegmentationPolicy(JSONObject policyData) {
+        try {
+            String protocol = policyData.optString("protocol", "tcp");
+            String defaultAction = policyData.optString("default_action", "DENY");
+            int priority = policyData.optInt("priority", 1000);
+
+            // Get ports to block
+            org.json.JSONArray portsArray = policyData.optJSONArray("ports");
+            if (portsArray == null || portsArray.length() == 0) {
+                helper.log(getName(), "WARN", "No ports specified for microsegmentation policy");
+                return false;
+            }
+
+            // For now, install a simple block rule for the specified ports
+            // In production, this would parse allow_rules and deny_rules from the policy
+            for (int i = 0; i < portsArray.length(); i++) {
+                int port = portsArray.getInt(i);
+                String flowId = "proactive-block-port-" + port;
+
+                helper.log(getName(), "INFO", "  Installing flow to block " + protocol.toUpperCase() + " port " + port);
+
+                // Use OpenDaylightClient to install the flow
+                // For now, we'll log the action (actual implementation would call ODL REST API)
+                helper.log(getName(), "INFO",
+                        "  [SIMULATED] Flow ID: " + flowId + ", Priority: " + priority + ", Action: DROP");
+            }
+
+            return true;
+
+        } catch (Exception e) {
+            helper.log(getName(), "ERROR", "Failed to install microsegmentation policy: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Install rate limiting policy (detect SMB scanning)
+     */
+    private boolean installRateLimitingPolicy(JSONObject policyData) {
+        try {
+            int maxConnections = policyData.optInt("max_new_connections", 5);
+            int timeWindow = policyData.optInt("time_window_seconds", 60);
+            String actionOnExceed = policyData.optString("action_on_exceed", "BLOCK_AND_ALERT");
+
+            helper.log(getName(), "INFO",
+                    "  Rate limit: " + maxConnections + " connections per " + timeWindow + " seconds");
+            helper.log(getName(), "INFO", "  Action on exceed: " + actionOnExceed);
+
+            // In production, this would configure ODL's rate limiting features
+            // For now, log the configuration
+            helper.log(getName(), "INFO", "  [SIMULATED] Rate limiting policy installed");
+
+            return true;
+
+        } catch (Exception e) {
+            helper.log(getName(), "ERROR", "Failed to install rate limiting policy: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Install port security policy (block external SMB)
+     */
+    private boolean installPortSecurityPolicy(JSONObject policyData) {
+        try {
+            String direction = policyData.optString("direction", "both");
+            int priority = policyData.optInt("priority", 950);
+
+            org.json.JSONArray portsArray = policyData.optJSONArray("ports");
+            if (portsArray == null || portsArray.length() == 0) {
+                helper.log(getName(), "WARN", "No ports specified for port security policy");
+                return false;
+            }
+
+            for (int i = 0; i < portsArray.length(); i++) {
+                int port = portsArray.getInt(i);
+                helper.log(getName(), "INFO",
+                        "  Blocking external traffic on port " + port + " (direction: " + direction + ")");
+            }
+
+            helper.log(getName(), "INFO", "  [SIMULATED] Port security policy installed");
+
+            return true;
+
+        } catch (Exception e) {
+            helper.log(getName(), "ERROR", "Failed to install port security policy: " + e.getMessage());
+            return false;
+        }
     }
 
     private void loadConfig() {

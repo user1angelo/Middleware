@@ -1,0 +1,84 @@
+name: "WannaCry Proactive Defense - Startup Policies"
+version: 1.0
+description: >
+  Comprehensive proactive SDN policies installed at system startup to prevent
+  WannaCry ransomware network propagation. Implements microsegmentation,
+  rate limiting, and port security for SMB traffic.
+
+trigger:
+  event_type: "system.startup"
+  condition: "{{ true }}"
+
+steps:
+  # Step 1: Microsegmentation - Default Deny SMB
+  - name: "Install SMB Microsegmentation Policy"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INSTALL_PROACTIVE_POLICY"
+        data:
+          policy_id: "pol_001_smb_microseg"
+          policy_name: "SMB Microsegmentation"
+          policy_type: "microsegmentation"
+          protocol: "tcp"
+          ports: [445, 139]
+          default_action: "DENY"
+          priority: 1000
+          persistent: true
+          justification: "WannaCry mitigation - microsegmentation prevents lateral movement"
+
+  # Step 2: Rate Limiting - Detect Scanning Behavior
+  - name: "Install SMB Rate Limiting Policy"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INSTALL_PROACTIVE_POLICY"
+        data:
+          policy_id: "pol_002_smb_rate_limit"
+          policy_name: "SMB Connection Rate Limiting"
+          policy_type: "rate_limiting"
+          protocol: "tcp"
+          ports: [445]
+          max_new_connections: 5
+          time_window_seconds: 60
+          action_on_exceed: "BLOCK_AND_ALERT"
+          block_duration_seconds: 300
+          alert_event_type: "SMB_SCANNING_DETECTED"
+          alert_severity: "high"
+          auto_trigger_mitigation: true
+          mitigation_action: "ISOLATE_VLAN"
+          priority: 900
+          persistent: true
+          justification: "WannaCry mitigation - detect rapid SMB scanning behavior"
+
+  # Step 3: Port Security - Block SMB to Internet
+  - name: "Install External SMB Blocking Policy"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INSTALL_PROACTIVE_POLICY"
+        data:
+          policy_id: "pol_003_smb_external_block"
+          policy_name: "Block External SMB Traffic"
+          policy_type: "port_security"
+          protocol: "tcp"
+          ports: [445, 139, 137, 138]
+          direction: "both"
+          action: "DROP"
+          log: true
+          priority: 950
+          persistent: true
+          justification: "WannaCry mitigation - SMB should never traverse Internet boundary"
+
+  # Step 4: Log Startup Completion
+  - name: "Log Proactive Defense Activation"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SOC_ALERT"
+        data:
+          alert_level: "info"
+          incident_type: "proactive_defense_activated"
+          message: "WannaCry proactive defense policies installed successfully at system startup"
+          policies_installed: 3
+          timestamp: "{{ trigger.timestamp }}"
