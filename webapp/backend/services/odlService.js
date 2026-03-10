@@ -13,6 +13,10 @@ const RABBITMQ_PORT = process.env.RABBITMQ_PORT || 5672;
 const RABBITMQ_USER = process.env.RABBITMQ_USER || 'user';
 const RABBITMQ_PASS = process.env.RABBITMQ_PASSWORD || 'password';
 const COMMAND_QUEUE = 'workflow_response_queue';
+const DEFAULT_ODL_NODE = process.env.ODL_DEFAULT_NODE || 'openflow:1';
+const DEFAULT_CONTAIN_ARP = process.env.QUARANTINE_CONTAIN_ARP === 'true';
+const DEFAULT_CONTAIN_DHCP = process.env.QUARANTINE_CONTAIN_DHCP === 'true';
+const DEFAULT_POLICY_MODE = process.env.QUARANTINE_POLICY_MODE || 'strict';
 
 class OdlService {
     constructor() {
@@ -41,6 +45,138 @@ class OdlService {
             return 0;
         }
         return Math.floor(parsed);
+    }
+
+    parseManagementPorts(portsInput) {
+        if (Array.isArray(portsInput)) {
+            return portsInput
+                .map((port) => Number(port))
+                .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
+        }
+
+        if (typeof portsInput === 'string') {
+            return portsInput
+                .split(',')
+                .map((part) => Number(part.trim()))
+                .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
+        }
+
+        return [];
+    }
+
+    normalizePolicy(options = {}) {
+        const policy = options.policy || {};
+        const managementHost = (policy.management_host || options.management_host || '').trim();
+        const managementPorts = this.parseManagementPorts(policy.management_ports ?? options.management_ports);
+        const containArp = policy.contain_arp ?? options.contain_arp ?? DEFAULT_CONTAIN_ARP;
+        const containDhcp = policy.contain_dhcp ?? options.contain_dhcp ?? DEFAULT_CONTAIN_DHCP;
+        const policyMode = options.policy_mode || policy.policy_mode || DEFAULT_POLICY_MODE;
+
+        return {
+            policy_mode: policyMode,
+            allowlist_profile: options.allowlist_profile || policy.allowlist_profile || 'custom',
+            management_host: managementHost,
+            management_ports: managementPorts,
+            contain_arp: Boolean(containArp),
+            contain_dhcp: Boolean(containDhcp)
+        };
+    }
+
+    extractHosts(topology) {
+        if (!topology || !topology['network-topology'] || !Array.isArray(topology['network-topology'].topology)) {
+            return [];
+        }
+
+        const hosts = [];
+        for (const topo of topology['network-topology'].topology) {
+            for (const node of topo.node || []) {
+                const nodeId = node['node-id'] || '';
+                if (!nodeId.startsWith('host:')) {
+                    continue;
+                }
+
+                const mac = nodeId.replace('host:', '').toLowerCase();
+                const addresses = node['host-tracker-service:addresses'] || [];
+                const attachment = (node['host-tracker-service:attachment-points'] || [])[0] || {};
+                const tpId = attachment['tp-id'] || null;
+                const resolvedNode = tpId ? tpId.split(':').slice(0, 2).join(':') : null;
+                const ip = addresses[0]?.ip || null;
+
+                let status = 'fallback';
+                if (resolvedNode && tpId) {
+                    status = 'resolved';
+                } else if (ip || mac) {
+                    status = 'partial';
+                }
+
+                hosts.push({
+                    id: nodeId,
+                    ip,
+                    mac,
+                    node: resolvedNode,
+                    port: tpId,
+                    status,
+                    source_of_truth: 'odl-host-tracker'
+                });
+            }
+        }
+
+        return hosts;
+    }
+
+    resolveLocalization(ip, mac, topology) {
+        const targetIp = (ip || '').trim();
+        const targetMac = (mac || '').trim().toLowerCase();
+        const hosts = this.extractHosts(topology);
+
+        const matched = hosts.find((host) => {
+            const byIp = targetIp && host.ip === targetIp;
+            const byMac = targetMac && host.mac === targetMac;
+            return byIp || byMac;
+        });
+
+        if (matched && matched.node && matched.port) {
+            return {
+                status: 'resolved',
+                node: matched.node,
+                port: matched.port,
+                source_of_truth: matched.source_of_truth,
+                fallback_reason: null
+            };
+        }
+
+        if (matched) {
+            return {
+                status: 'partial',
+                node: matched.node || DEFAULT_ODL_NODE,
+                port: matched.port || null,
+                source_of_truth: matched.source_of_truth,
+                fallback_reason: matched.node ? 'missing-port' : 'missing-node-and-port'
+            };
+        }
+
+        return {
+            status: 'fallback',
+            node: DEFAULT_ODL_NODE,
+            port: null,
+            source_of_truth: 'default-node',
+            fallback_reason: 'host-not-found-in-topology'
+        };
+    }
+
+    async getTopologyView() {
+        const topology = await this.getTopology();
+        const hosts = this.extractHosts(topology);
+        return {
+            raw_topology: topology,
+            hosts,
+            summary: {
+                total_hosts: hosts.length,
+                resolved: hosts.filter((host) => host.status === 'resolved').length,
+                partial: hosts.filter((host) => host.status === 'partial').length,
+                fallback: hosts.filter((host) => host.status === 'fallback').length
+            }
+        };
     }
 
     scheduleAutoExpiry(mitigationId) {
@@ -204,6 +340,13 @@ class OdlService {
         const createdAt = new Date().toISOString();
         const expiresAt = autoExpire && durationMs > 0 ? new Date(Date.now() + durationMs).toISOString() : null;
         const rollbackNote = options.rollback_note || 'Manual rollback from web dashboard';
+        const policy = this.normalizePolicy(options);
+        const topology = await this.getTopology();
+        const localization = this.resolveLocalization(ip, mac, topology);
+
+        console.log(
+            `[ODL isolate] ${ip || mac} policy=${policy.policy_mode} node=${localization.node} port=${localization.port || 'n/a'} status=${localization.status}`
+        );
 
         const payload = {
             targetHost: ip,
@@ -217,6 +360,10 @@ class OdlService {
             auto_expire: autoExpire,
             duration_ms: durationMs,
             rollback_note: rollbackNote,
+            policy_mode: policy.policy_mode,
+            allowlist_profile: policy.allowlist_profile,
+            isolation_policy: policy,
+            localization,
             lifecycle: {
                 auto_expire: autoExpire,
                 duration_ms: durationMs,
@@ -251,6 +398,8 @@ class OdlService {
         return {
             status: 'sent',
             mitigation_id: mitigationId,
+            localization,
+            effective_policy: policy,
             command
         };
     }

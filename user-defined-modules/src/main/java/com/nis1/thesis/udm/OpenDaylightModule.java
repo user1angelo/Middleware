@@ -3,6 +3,8 @@ package com.nis1.thesis.udm;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -53,19 +55,27 @@ public class OpenDaylightModule implements PluggableModule {
     private String odlBaseUrl = "http://localhost:8181";
     private String odlUsername = "admin";
     private String odlPassword = "admin";
+    private String quarantineDefaultNode = "openflow:1";
+    private boolean quarantineContainArp = false;
+    private boolean quarantineContainDhcp = false;
 
     private volatile boolean running = false;
 
     private static class ActiveMitigation {
         private final String mitigationId;
         private final String targetHost;
+        private final String targetMac;
+        private final OpenDaylightClient.IsolationPolicy policy;
         private final String owner;
         private final long createdAtMs;
         private volatile long expiresAtMs;
 
-        ActiveMitigation(String mitigationId, String targetHost, String owner, long createdAtMs, long expiresAtMs) {
+        ActiveMitigation(String mitigationId, String targetHost, String targetMac,
+                OpenDaylightClient.IsolationPolicy policy, String owner, long createdAtMs, long expiresAtMs) {
             this.mitigationId = mitigationId;
             this.targetHost = targetHost;
+            this.targetMac = targetMac;
+            this.policy = policy;
             this.owner = owner;
             this.createdAtMs = createdAtMs;
             this.expiresAtMs = expiresAtMs;
@@ -86,7 +96,15 @@ public class OpenDaylightModule implements PluggableModule {
 
         // Initialize services
         this.scanner = new NetworkScannerService(helper, getName());
-        this.odlClient = new OpenDaylightClient(helper, getName(), odlBaseUrl, odlUsername, odlPassword);
+        this.odlClient = new OpenDaylightClient(
+            helper,
+            getName(),
+            odlBaseUrl,
+            odlUsername,
+            odlPassword,
+            quarantineDefaultNode,
+            quarantineContainArp,
+            quarantineContainDhcp);
 
         this.running = true;
 
@@ -135,6 +153,8 @@ public class OpenDaylightModule implements PluggableModule {
             String owner = payload.optString("owner", "workflow");
             long durationMs = extractDurationMs(payload);
             boolean autoExpire = payload.optBoolean("auto_expire", false);
+            String targetMac = payload.optString("targetMac", payload.optString("target_mac", ""));
+            OpenDaylightClient.IsolationPolicy policy = parseIsolationPolicy(payload);
 
             if ((targetHost == null || targetHost.isEmpty()) && payload.has("targetHost")) {
                 targetHost = payload.optString("targetHost");
@@ -147,10 +167,18 @@ public class OpenDaylightModule implements PluggableModule {
                     action == MitigationAction.QUARANTINE ||
                     action == MitigationAction.ISOLATE_VLAN) {
 
-                boolean success = odlClient.isolateHost(targetHost, mitigationId);
+                OpenDaylightClient.IsolationResult result =
+                    odlClient.isolateHost(targetHost, targetMac, mitigationId, policy);
+                boolean success = result.success;
                 if (success) {
                     helper.log(getName(), "INFO", "Successfully isolated host: " + targetHost);
-                    registerMitigation(mitigationId, targetHost, owner, autoExpire, durationMs);
+                    helper.log(getName(), "INFO", "Isolation localization: node=" + result.localization.nodeId
+                        + ", port=" + result.localization.portId
+                        + ", status=" + result.localization.status
+                        + ", source=" + result.localization.sourceOfTruth);
+                    helper.log(getName(), "INFO", "Policy rule counts: drop=" + result.dropRules
+                        + ", allowlist=" + result.allowRules);
+                    registerMitigation(mitigationId, targetHost, targetMac, policy, owner, autoExpire, durationMs);
                 } else {
                     helper.log(getName(), "ERROR", "Failed to isolate host: " + targetHost);
                 }
@@ -180,6 +208,8 @@ public class OpenDaylightModule implements PluggableModule {
             JSONObject payload = parseCommandPayload(command);
             String mitigationId = payload.optString("mitigation_id", null);
             String targetHost = command.getTargetHost();
+            String targetMac = payload.optString("targetMac", payload.optString("target_mac", ""));
+            OpenDaylightClient.IsolationPolicy policy = null;
 
             if ((targetHost == null || targetHost.isEmpty()) && payload.has("targetHost")) {
                 targetHost = payload.optString("targetHost");
@@ -195,16 +225,21 @@ public class OpenDaylightModule implements PluggableModule {
                 if (targetHost == null || targetHost.isEmpty()) {
                     targetHost = record.targetHost;
                 }
+                if (targetMac == null || targetMac.isEmpty()) {
+                    targetMac = record.targetMac;
+                }
+                policy = record.policy;
             }
 
-            if (targetHost == null || targetHost.isEmpty()) {
-                helper.log(getName(), "ERROR", "Cannot remove mitigation: missing target host");
+            if ((targetHost == null || targetHost.isEmpty()) && (targetMac == null || targetMac.isEmpty())) {
+                helper.log(getName(), "ERROR", "Cannot remove mitigation: missing target host and target mac");
                 return;
             }
 
-            helper.log(getName(), "INFO", "Received remove mitigation request for " + targetHost);
+            helper.log(getName(), "INFO", "Received remove mitigation request for "
+                    + (targetHost != null && !targetHost.isEmpty() ? targetHost : targetMac));
 
-            boolean success = odlClient.removeIsolation(targetHost, mitigationId);
+            boolean success = odlClient.removeIsolation(targetHost, targetMac, mitigationId, policy);
             if (success) {
                 helper.log(getName(), "INFO", "Successfully removed isolation from host: " + targetHost);
                 if (mitigationId != null && !mitigationId.isEmpty()) {
@@ -470,6 +505,11 @@ public class OpenDaylightModule implements PluggableModule {
             odlBaseUrl = props.getProperty("odl.base_url", odlBaseUrl);
             odlUsername = props.getProperty("odl.username", odlUsername);
             odlPassword = props.getProperty("odl.password", odlPassword);
+                quarantineDefaultNode = props.getProperty("quarantine.default_node", quarantineDefaultNode);
+                quarantineContainArp = Boolean.parseBoolean(
+                    props.getProperty("quarantine.containment.arp.enabled", String.valueOf(quarantineContainArp)));
+                quarantineContainDhcp = Boolean.parseBoolean(
+                    props.getProperty("quarantine.containment.dhcp.enabled", String.valueOf(quarantineContainDhcp)));
             moduleId = props.getProperty("module.id", moduleId);
             moduleName = props.getProperty("module.name", moduleName);
         } catch (IOException e) {
@@ -504,11 +544,63 @@ public class OpenDaylightModule implements PluggableModule {
         return 0L;
     }
 
-    private void registerMitigation(String mitigationId, String targetHost, String owner, boolean autoExpire,
+    private OpenDaylightClient.IsolationPolicy parseIsolationPolicy(JSONObject payload) {
+        JSONObject policyJson = payload.optJSONObject("isolation_policy");
+        if (policyJson == null) {
+            policyJson = payload.optJSONObject("policy");
+        }
+        if (policyJson == null) {
+            policyJson = new JSONObject();
+        }
+
+        String policyMode = policyJson.optString("policy_mode", payload.optString("policy_mode", "strict"));
+        String managementHost = policyJson.optString("management_host", payload.optString("management_host", ""));
+        boolean containArp = policyJson.has("contain_arp")
+                ? policyJson.optBoolean("contain_arp", quarantineContainArp)
+                : payload.optBoolean("contain_arp", quarantineContainArp);
+        boolean containDhcp = policyJson.has("contain_dhcp")
+                ? policyJson.optBoolean("contain_dhcp", quarantineContainDhcp)
+                : payload.optBoolean("contain_dhcp", quarantineContainDhcp);
+
+        List<Integer> managementPorts = new ArrayList<>();
+        Object portsObj = policyJson.has("management_ports") ? policyJson.get("management_ports")
+                : payload.opt("management_ports");
+        if (portsObj instanceof org.json.JSONArray) {
+            org.json.JSONArray portsArray = (org.json.JSONArray) portsObj;
+            for (int i = 0; i < portsArray.length(); i++) {
+                int port = portsArray.optInt(i, -1);
+                if (port > 0 && port <= 65535) {
+                    managementPorts.add(port);
+                }
+            }
+        } else if (portsObj instanceof String) {
+            String[] parts = ((String) portsObj).split(",");
+            for (String part : parts) {
+                try {
+                    int port = Integer.parseInt(part.trim());
+                    if (port > 0 && port <= 65535) {
+                        managementPorts.add(port);
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+
+        return new OpenDaylightClient.IsolationPolicy(
+                policyMode,
+                managementHost,
+                managementPorts,
+                containArp,
+                containDhcp);
+    }
+
+    private void registerMitigation(String mitigationId, String targetHost, String targetMac,
+            OpenDaylightClient.IsolationPolicy policy, String owner, boolean autoExpire,
             long durationMs) {
         long now = Instant.now().toEpochMilli();
         long expiresAt = autoExpire && durationMs > 0 ? now + durationMs : 0L;
-        ActiveMitigation mitigation = new ActiveMitigation(mitigationId, targetHost, owner, now, expiresAt);
+        ActiveMitigation mitigation = new ActiveMitigation(mitigationId, targetHost, targetMac, policy, owner, now,
+                expiresAt);
         activeMitigations.put(mitigationId, mitigation);
 
         cancelMitigationTimer(mitigationId);
@@ -536,7 +628,8 @@ public class OpenDaylightModule implements PluggableModule {
 
         helper.log(getName(), "INFO", "Auto-expiring mitigation " + mitigationId + " for host "
                 + mitigation.targetHost);
-        boolean removed = odlClient.removeIsolation(mitigation.targetHost, mitigationId);
+        boolean removed = odlClient.removeIsolation(mitigation.targetHost, mitigation.targetMac, mitigationId,
+            mitigation.policy);
         if (removed) {
             activeMitigations.remove(mitigationId);
             mitigationTimers.remove(mitigationId);

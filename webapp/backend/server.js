@@ -191,8 +191,8 @@ app.put('/api/udm-configs/:id', async (req, res) => {
 // ===== ODL Network Routes =====
 app.get('/api/odl/topology', async (req, res) => {
   try {
-    const topology = await odlService.getTopology();
-    res.json(topology);
+    const topologyView = await odlService.getTopologyView();
+    res.json(topologyView);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -200,12 +200,33 @@ app.get('/api/odl/topology', async (req, res) => {
 
 app.post('/api/odl/isolate', async (req, res) => {
   try {
-    const { ip, mac, duration_ms, auto_expire, rollback_note, mitigation_id } = req.body;
+    const {
+      ip,
+      mac,
+      duration_ms,
+      auto_expire,
+      rollback_note,
+      mitigation_id,
+      policy_mode,
+      allowlist_profile,
+      policy,
+      management_host,
+      management_ports,
+      contain_arp,
+      contain_dhcp
+    } = req.body;
     const result = await odlService.isolateHost(ip, mac, {
       duration_ms,
       auto_expire,
       rollback_note,
-      mitigation_id
+      mitigation_id,
+      policy_mode,
+      allowlist_profile,
+      policy,
+      management_host,
+      management_ports,
+      contain_arp,
+      contain_dhcp
     });
     res.json(result);
   } catch (error) {
