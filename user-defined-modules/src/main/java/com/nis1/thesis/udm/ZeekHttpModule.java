@@ -237,7 +237,8 @@ public class ZeekHttpModule implements PluggableModule {
                 combined.contains("smb") ||
                 combined.contains("eternalblue") ||
                 combined.contains("exploit") ||
-                combined.contains("crypto");
+                combined.contains("crypto") ||
+                combined.contains("smb_mapping_event");
     }
 
     /**
@@ -251,10 +252,15 @@ public class ZeekHttpModule implements PluggableModule {
         payload.setAlertId(generateAlertId());
         payload.setNoteType(notice.note);
         payload.setSignature(notice.msg != null ? notice.msg : notice.note);
-        payload.setSubMessage(notice.sub != null ? notice.sub : "");
+
+        String subMessage = notice.sub != null ? notice.sub : "";
+        if (notice.path != null && !notice.path.isEmpty()) {
+            subMessage = subMessage.isEmpty() ? "Path: " + notice.path : subMessage + " | Path: " + notice.path;
+        }
+        payload.setSubMessage(subMessage);
 
         // Determine severity
-        String severity = determineSeverity(notice.note, notice.msg);
+        String severity = determineSeverity(notice.note, notice.msg, notice.path);
         payload.setSeverity(severity);
 
         // Network context
@@ -269,7 +275,7 @@ public class ZeekHttpModule implements PluggableModule {
         payload.setProtocol(notice.proto != null ? notice.proto.toUpperCase() : "UNKNOWN");
 
         // Classification
-        String category = categorizeFromNote(notice.note, notice.msg);
+        String category = categorizeFromNote(notice.note, notice.msg, notice.path);
         payload.setCategory(category);
         payload.setAlertType(category);
 
@@ -301,12 +307,15 @@ public class ZeekHttpModule implements PluggableModule {
     // Utility methods
     // ---------------------------------------------------------------------
 
-    private String determineSeverity(String noteType, String message) {
+    private String determineSeverity(String noteType, String message, String path) {
         String combined = (noteType + " " + (message != null ? message : "")).toLowerCase();
+        boolean isIpcShare = path != null && path.toUpperCase().contains("IPC$");
 
         if (combined.contains("ransomware") ||
                 combined.contains("malware") ||
                 combined.contains("eternalblue") ||
+                combined.contains("wannacry") ||
+                (combined.contains("smb_mapping_event") && isIpcShare) ||
                 combined.contains("c2")) {
             return "critical";
         } else if (combined.contains("scan::port_scan") ||
@@ -321,10 +330,15 @@ public class ZeekHttpModule implements PluggableModule {
         return "low";
     }
 
-    private String categorizeFromNote(String noteType, String message) {
+    private String categorizeFromNote(String noteType, String message, String path) {
         String combined = (noteType + " " + (message != null ? message : "")).toLowerCase();
+        boolean isIpcShare = path != null && path.toUpperCase().contains("IPC$");
 
-        if (combined.contains("ransomware")) {
+        if (combined.contains("ransomware") ||
+                combined.contains("wannacry") ||
+                combined.contains("eternalblue") ||
+                combined.contains("ms17-010") ||
+                (combined.contains("smb_mapping_event") && isIpcShare)) {
             return "ransomware";
         } else if (combined.contains("malware") || combined.contains("trojan")) {
             return "malware";
@@ -334,7 +348,7 @@ public class ZeekHttpModule implements PluggableModule {
             return "reconnaissance";
         } else if (combined.contains("lateral")) {
             return "lateral_movement";
-        } else if (combined.contains("smb") || combined.contains("eternalblue")) {
+        } else if (combined.contains("smb")) {
             return "exploit";
         }
         return "network_threat";
@@ -402,5 +416,8 @@ public class ZeekHttpModule implements PluggableModule {
 
         @SerializedName("actions")
         String actions; // Actions taken
+
+        @SerializedName("path")
+        String path; // SMB Path
     }
 }

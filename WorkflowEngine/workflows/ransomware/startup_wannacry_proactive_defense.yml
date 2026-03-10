@@ -22,7 +22,7 @@ steps:
           policy_type: "microsegmentation"
           protocol: "tcp"
           ports: [445, 139]
-          default_action: "DENY"
+          default_action: "ALLOW"
           priority: 1000
           persistent: true
           justification: "WannaCry mitigation - microsegmentation prevents lateral movement"

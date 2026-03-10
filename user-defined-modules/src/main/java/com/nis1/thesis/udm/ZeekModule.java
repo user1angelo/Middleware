@@ -61,6 +61,7 @@ public class ZeekModule {
     // --- Zeek Configuration -------------------------------------------------
 
     private static String NOTICE_LOG_PATH = "/opt/zeek/logs/current/notice.log";
+    private static String SMB_MAPPING_LOG_PATH = "/opt/zeek/logs/current/smb_mapping.log";
 
     // --- Heartbeat Configuration --------------------------------------------
 
@@ -139,8 +140,8 @@ public class ZeekModule {
             // 3) Start command listener
             startCommandListener(channel);
 
-            // 4) Start notice.log monitoring
-            startNoticeLogMonitoring(channel);
+            // 4) Start Zeek logs monitoring
+            startZeekLogsMonitoring(channel);
 
             System.out.println("\n✅ ZeekModule is running. Press Ctrl+C to stop.\n");
 
@@ -305,78 +306,86 @@ public class ZeekModule {
     // ---------------------------------------------------------------------
 
     /**
-     * Starts real-time monitoring of Zeek notice.log file
+     * Starts real-time monitoring of Zeek log files
      */
-    private static void startNoticeLogMonitoring(Channel channel) {
-        fileWatcher = Executors.newSingleThreadExecutor();
+    private static void startZeekLogsMonitoring(Channel channel) {
+        fileWatcher = Executors.newFixedThreadPool(2);
 
-        fileWatcher.submit(() -> {
-            System.out.println("📡 Starting real-time notice.log monitoring...");
-            System.out.println("   Monitoring: " + NOTICE_LOG_PATH + "\n");
+        fileWatcher.submit(() -> monitorFile(NOTICE_LOG_PATH, channel, ZeekModule::parseNoticeLine));
+        fileWatcher.submit(() -> monitorFile(SMB_MAPPING_LOG_PATH, channel, ZeekModule::parseSmbMappingLine));
+    }
 
-            try {
-                Path noticeLogPath = Paths.get(NOTICE_LOG_PATH);
-                Path dir = noticeLogPath.getParent();
+    private static void monitorFile(String filePath, Channel channel,
+            java.util.function.BiConsumer<String, Channel> parser) {
+        System.out.println("📡 Starting real-time monitoring: " + filePath);
 
-                try (WatchService watchService = FileSystems.getDefault().newWatchService()) {
-                    dir.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+        try {
+            Path targetPath = Paths.get(filePath);
+            Path dir = targetPath.getParent();
 
-                    // Start from current end of file - only process NEW notices
-                    long lastPosition = Files.size(noticeLogPath);
-                    System.out.println("✅ Monitoring started from position: " + lastPosition);
+            if (!Files.exists(targetPath)) {
+                System.out.println("⚠️  File not found (yet): " + filePath);
+            }
 
-                    while (running && !Thread.currentThread().isInterrupted()) {
-                        WatchKey key = watchService.poll(1, TimeUnit.SECONDS);
+            try (WatchService watchService = FileSystems.getDefault().newWatchService()) {
+                dir.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_CREATE);
 
-                        if (key == null) {
-                            continue;
-                        }
+                long lastPosition = Files.exists(targetPath) ? Files.size(targetPath) : 0;
+                System.out.println(
+                        "✅ Monitoring " + targetPath.getFileName() + " started from position: " + lastPosition);
 
-                        for (WatchEvent<?> event : key.pollEvents()) {
-                            Path changed = (Path) event.context();
+                while (running && !Thread.currentThread().isInterrupted()) {
+                    WatchKey key = watchService.poll(1, TimeUnit.SECONDS);
 
-                            if (changed.endsWith(noticeLogPath.getFileName())) {
-                                try (RandomAccessFile raf = new RandomAccessFile(noticeLogPath.toFile(), "r")) {
-                                    long currentSize = raf.length();
-
-                                    if (currentSize > lastPosition) {
-                                        raf.seek(lastPosition);
-
-                                        // Read all new lines
-                                        String line;
-                                        while ((line = raf.readLine()) != null) {
-                                            if (!line.trim().isEmpty() && !line.startsWith("#")) {
-                                                try {
-                                                    parseNoticeLine(line, channel);
-                                                } catch (Exception e) {
-                                                    System.err.println("❌ Error parsing line: " + e.getMessage());
-                                                }
-                                            }
-                                        }
-
-                                        lastPosition = raf.getFilePointer();
-                                    } else if (currentSize < lastPosition) {
-                                        // File was truncated or rotated
-                                        System.out.println("⚠️  notice.log file rotated. Starting from beginning.");
-                                        lastPosition = 0;
-                                    }
-                                }
-                            }
-                        }
-
-                        key.reset();
+                    if (key == null) {
+                        continue;
                     }
 
-                } catch (InterruptedException e) {
-                    System.out.println("ℹ️  notice.log monitoring interrupted");
-                    Thread.currentThread().interrupt();
+                    for (WatchEvent<?> event : key.pollEvents()) {
+                        Path changed = (Path) event.context();
+
+                        if (changed.endsWith(targetPath.getFileName())) {
+                            try (RandomAccessFile raf = new RandomAccessFile(targetPath.toFile(), "r")) {
+                                long currentSize = raf.length();
+
+                                if (currentSize > lastPosition) {
+                                    raf.seek(lastPosition);
+
+                                    String line;
+                                    while ((line = raf.readLine()) != null) {
+                                        if (!line.trim().isEmpty() && !line.startsWith("#")) {
+                                            try {
+                                                parser.accept(line, channel);
+                                            } catch (Exception e) {
+                                                System.err.println("❌ Error parsing line in " + targetPath.getFileName()
+                                                        + ": " + e.getMessage());
+                                            }
+                                        }
+                                    }
+
+                                    lastPosition = raf.getFilePointer();
+                                } else if (currentSize < lastPosition) {
+                                    System.out.println("⚠️  " + targetPath.getFileName()
+                                            + " file rotated. Starting from beginning.");
+                                    lastPosition = 0;
+                                }
+                            } catch (Exception e) {
+                                // File might be temporarily locked, ignore and try on next poll
+                            }
+                        }
+                    }
+
+                    key.reset();
                 }
 
-            } catch (Exception e) {
-                System.err.println("❌ Failed to monitor notice.log file: " + e.getMessage());
-                e.printStackTrace();
+            } catch (InterruptedException e) {
+                System.out.println("ℹ️  " + targetPath.getFileName() + " monitoring interrupted");
+                Thread.currentThread().interrupt();
             }
-        });
+
+        } catch (Exception e) {
+            System.err.println("❌ Failed to monitor " + filePath + ": " + e.getMessage());
+        }
     }
 
     /**
@@ -425,6 +434,45 @@ public class ZeekModule {
 
         } catch (Exception e) {
             System.err.println("❌ Failed to parse notice.log line: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Parses a single line from Zeek smb_mapping.log file
+     * and publishes standardized alert if it represents EternalBlue/WannaCry
+     * lateral movement
+     */
+    private static void parseSmbMappingLine(String line, Channel channel) {
+        try {
+            String[] fields = line.split(FIELD_SEPARATOR, -1);
+
+            if (fields.length < 6) {
+                return;
+            }
+
+            String ts = fields[0];
+            String srcIp = parseField(fields[2]);
+            String srcPort = parseField(fields[3]);
+            String dstIp = parseField(fields[4]);
+            String dstPort = parseField(fields[5]);
+            // path is typically field 6
+            String path = fields.length > 6 ? parseField(fields[6]) : "-";
+
+            if (srcIp == null || dstIp == null) {
+                return;
+            }
+
+            // Detect WannaCry / EternalBlue anomalous IPC$ traffic
+            if (path != null && path.contains("IPC$")) {
+                String noteType = "EternalBlue_Exploit_Attempt";
+                String message = "Suspicious SMB IPC$ connection (Possible lateral movement)";
+                String subMessage = "Path: " + path;
+
+                publishZeekAlert(noteType, message, subMessage, srcIp, srcPort, dstIp, dstPort, "SMB", ts, channel);
+            }
+
+        } catch (Exception e) {
+            System.err.println("❌ Failed to parse smb_mapping.log line: " + e.getMessage());
         }
     }
 
@@ -606,7 +654,9 @@ public class ZeekModule {
                 combined.contains("wannacry") ||
                 combined.contains("petya") ||
                 combined.contains("dharma") ||
-                combined.contains("ryuk")) {
+                combined.contains("ryuk") ||
+                combined.contains("eternalblue") ||
+                combined.contains("ms17-010")) {
             return "ransomware";
         } else if (combined.contains("malware") || combined.contains("trojan")) {
             return "malware";
@@ -616,7 +666,7 @@ public class ZeekModule {
             return "reconnaissance";
         } else if (combined.contains("lateral")) {
             return "lateral_movement";
-        } else if (combined.contains("smb") || combined.contains("eternalblue")) {
+        } else if (combined.contains("smb")) {
             return "exploit";
         }
         return "ransomware"; // Default to ransomware for this focused module
@@ -670,6 +720,7 @@ public class ZeekModule {
 
             // Zeek configuration
             NOTICE_LOG_PATH = props.getProperty("zeek.notice_log_path", NOTICE_LOG_PATH);
+            SMB_MAPPING_LOG_PATH = props.getProperty("zeek.smb_mapping_log_path", SMB_MAPPING_LOG_PATH);
 
             // Module identity
             MODULE_ID = props.getProperty("module.id", MODULE_ID);

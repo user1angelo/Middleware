@@ -492,7 +492,10 @@ public class SuricataModule {
 
         String lower = signature.toLowerCase();
 
-        if (lower.contains("malware") || lower.contains("trojan")) {
+        if (lower.contains("wannacry") || lower.contains("eternalblue") || lower.contains("ms17-010")
+                || lower.contains("doublepulsar")) {
+            return "ransomware";
+        } else if (lower.contains("malware") || lower.contains("trojan")) {
             return "malware";
         } else if (lower.contains("exploit") || lower.contains("cve-")) {
             return "exploit";
