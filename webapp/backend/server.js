@@ -200,26 +200,8 @@ app.get('/api/odl/topology', async (req, res) => {
 
 app.post('/api/odl/isolate', async (req, res) => {
   try {
-    const { ip, mac, duration_ms, auto_expire, rollback_note, mitigation_id } = req.body;
-    const result = await odlService.isolateHost(ip, mac, {
-      duration_ms,
-      auto_expire,
-      rollback_note,
-      mitigation_id
-    });
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/odl/remove-isolation', async (req, res) => {
-  try {
-    const { ip, mac, mitigation_id, rollback_note } = req.body;
-    const result = await odlService.removeIsolation(ip, mac, {
-      mitigation_id,
-      rollback_note
-    });
+    const { ip, mac } = req.body;
+    const result = await odlService.isolateHost(ip, mac);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -230,34 +212,6 @@ app.post('/api/odl/scan', async (req, res) => {
   try {
     const { start_ip } = req.body;
     const result = await odlService.triggerNetworkScan(start_ip);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/odl/mitigations', async (req, res) => {
-  try {
-    const result = odlService.listMitigations();
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/odl/mitigations/:id/clear', async (req, res) => {
-  try {
-    const result = await odlService.clearMitigation(req.params.id, req.body || {});
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/odl/mitigations/:id/extend', async (req, res) => {
-  try {
-    const { duration_ms } = req.body || {};
-    const result = await odlService.extendMitigation(req.params.id, duration_ms);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -19,80 +19,7 @@ class OdlService {
         this.connection = null;
         this.channel = null;
         this.connecting = false;
-        this.activeMitigations = new Map();
-        this.expiryTimers = new Map();
         this.connectRabbitMQ();
-    }
-
-    createEnvelope(eventType, payload, eventIdPrefix = 'manual') {
-        return {
-            message_type: 'workflow_command',
-            event_id: `${eventIdPrefix}-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            event_type: eventType,
-            source_module: 'Webapp',
-            payload
-        };
-    }
-
-    normalizeDurationMs(durationMs) {
-        const parsed = Number(durationMs);
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-            return 0;
-        }
-        return Math.floor(parsed);
-    }
-
-    scheduleAutoExpiry(mitigationId) {
-        const mitigation = this.activeMitigations.get(mitigationId);
-        if (!mitigation || !mitigation.auto_expire || !mitigation.expires_at) {
-            return;
-        }
-
-        if (this.expiryTimers.has(mitigationId)) {
-            clearTimeout(this.expiryTimers.get(mitigationId));
-            this.expiryTimers.delete(mitigationId);
-        }
-
-        const remainingMs = new Date(mitigation.expires_at).getTime() - Date.now();
-        if (remainingMs <= 0) {
-            this.clearMitigation(mitigationId, {
-                reason: 'auto-expired',
-                rollback_note: 'Auto-expired by lifecycle policy'
-            }).catch((error) => {
-                console.error(`❌ Failed to auto-clear mitigation ${mitigationId}:`, error.message);
-            });
-            return;
-        }
-
-        const timer = setTimeout(() => {
-            this.clearMitigation(mitigationId, {
-                reason: 'auto-expired',
-                rollback_note: 'Auto-expired by lifecycle policy'
-            }).catch((error) => {
-                console.error(`❌ Failed to auto-clear mitigation ${mitigationId}:`, error.message);
-            });
-        }, remainingMs);
-
-        this.expiryTimers.set(mitigationId, timer);
-    }
-
-    getMitigationSnapshot(mitigation) {
-        return {
-            mitigation_id: mitigation.mitigation_id,
-            ip: mitigation.ip,
-            mac: mitigation.mac,
-            status: mitigation.status,
-            created_at: mitigation.created_at,
-            updated_at: mitigation.updated_at,
-            expires_at: mitigation.expires_at,
-            auto_expire: mitigation.auto_expire,
-            duration_ms: mitigation.duration_ms,
-            rollback_note: mitigation.rollback_note,
-            owner: mitigation.owner,
-            last_command_event_id: mitigation.last_command_event_id,
-            clear_reason: mitigation.clear_reason || null
-        };
     }
 
     async connectRabbitMQ() {
@@ -195,100 +122,53 @@ class OdlService {
     }
 
     // Publish isolation command
-    async isolateHost(ip, mac, options = {}) {
+    async isolateHost(ip, mac) {
         await this.waitForChannel();
 
-        const mitigationId = options.mitigation_id || `mit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const autoExpire = options.auto_expire !== false;
-        const durationMs = this.normalizeDurationMs(options.duration_ms);
-        const createdAt = new Date().toISOString();
-        const expiresAt = autoExpire && durationMs > 0 ? new Date(Date.now() + durationMs).toISOString() : null;
-        const rollbackNote = options.rollback_note || 'Manual rollback from web dashboard';
-
-        const payload = {
-            targetHost: ip,
-            targetMac: mac,
-            action: 'ISOLATE_VLAN',
-            priority: 'high',
-            sdn_controller: 'opendaylight',
-            justification: 'Manual isolation via Web Dashboard',
-            mitigation_id: mitigationId,
-            owner: 'webapp',
-            auto_expire: autoExpire,
-            duration_ms: durationMs,
-            rollback_note: rollbackNote,
-            lifecycle: {
-                auto_expire: autoExpire,
-                duration_ms: durationMs,
-                rollback_note: rollbackNote,
-                created_at: createdAt,
-                expires_at: expiresAt
+        const command = {
+            message_type: 'workflow_command',
+            event_id: `manual-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            event_type: 'INITIATE_MITIGATION',
+            source_module: 'Webapp',
+            payload: {
+                targetHost: ip,
+                action: 'ISOLATE_VLAN',
+                priority: 'high',
+                sdn_controller: 'opendaylight',
+                justification: 'Manual isolation via Web Dashboard',
+                // Optional extras if needed for debugging
+                mac_address: mac
             }
         };
 
-        const command = this.createEnvelope('INITIATE_MITIGATION', payload, 'manual');
-
         this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
-        console.log(`📤 Published manual isolation command for ${ip || mac} (mitigation_id=${mitigationId})`);
-
-        this.activeMitigations.set(mitigationId, {
-            mitigation_id: mitigationId,
-            ip: ip || '',
-            mac: mac || '',
-            status: 'active',
-            created_at: createdAt,
-            updated_at: createdAt,
-            expires_at: expiresAt,
-            auto_expire: autoExpire,
-            duration_ms: durationMs,
-            rollback_note: rollbackNote,
-            owner: 'webapp',
-            last_command_event_id: command.event_id
-        });
-
-        this.scheduleAutoExpiry(mitigationId);
-
-        return {
-            status: 'sent',
-            mitigation_id: mitigationId,
-            command
-        };
+        console.log(`📤 Published manual isolation command for ${ip || mac}`);
+        return { status: 'sent', command };
     }
 
     // Publish remove isolation command
-    async removeIsolation(ip, mac, options = {}) {
+    async removeIsolation(ip, mac) {
         await this.waitForChannel();
 
-        const mitigationId = options.mitigation_id || null;
-        const rollbackNote = options.rollback_note || 'Manual clear from web dashboard';
-
-        const payload = {
-            targetHost: ip,
-            targetMac: mac,
-            action: 'REMOVE_ISOLATION',
-            priority: 'high',
-            sdn_controller: 'opendaylight',
-            justification: 'Manual removal of isolation via Web Dashboard',
-            mitigation_id: mitigationId,
-            owner: 'webapp',
-            rollback_note: rollbackNote
+        const command = {
+            message_type: 'workflow_command',
+            event_id: `manual-remove-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            event_type: 'REMOVE_MITIGATION',
+            source_module: 'Webapp',
+            payload: {
+                targetHost: ip,
+                action: 'REMOVE_ISOLATION',
+                priority: 'high',
+                sdn_controller: 'opendaylight',
+                justification: 'Manual removal of isolation via Web Dashboard',
+                mac_address: mac
+            }
         };
 
-        const command = this.createEnvelope('REMOVE_MITIGATION', payload, 'manual-remove');
-
         this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
-        console.log(`📤 Published manual remove isolation command for ${ip || mac} (mitigation_id=${mitigationId || 'n/a'})`);
-
-        if (mitigationId && this.activeMitigations.has(mitigationId)) {
-            const existing = this.activeMitigations.get(mitigationId);
-            const now = new Date().toISOString();
-            existing.status = 'clearing';
-            existing.updated_at = now;
-            existing.last_command_event_id = command.event_id;
-            existing.clear_reason = rollbackNote;
-            this.activeMitigations.set(mitigationId, existing);
-        }
-
+        console.log(`📤 Published manual remove isolation command for ${ip || mac}`);
         return { status: 'sent', command };
     }
 
@@ -317,79 +197,6 @@ class OdlService {
         this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
         console.log(`📤 Published network scan command${startIp ? ' for ' + startIp : ''}`);
         return { status: 'sent', command };
-    }
-
-    listMitigations() {
-        const mitigations = Array.from(this.activeMitigations.values())
-            .filter((item) => item.status === 'active' || item.status === 'clearing')
-            .map((item) => this.getMitigationSnapshot(item))
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-        return {
-            success: true,
-            mitigations
-        };
-    }
-
-    async clearMitigation(mitigationId, options = {}) {
-        const mitigation = this.activeMitigations.get(mitigationId);
-        if (!mitigation) {
-            throw new Error(`Unknown mitigation_id: ${mitigationId}`);
-        }
-
-        const reason = options.reason || 'manual-clear';
-        const rollbackNote = options.rollback_note || mitigation.rollback_note || 'Manual clear';
-
-        await this.removeIsolation(mitigation.ip, mitigation.mac, {
-            mitigation_id: mitigationId,
-            rollback_note: rollbackNote
-        });
-
-        mitigation.status = 'cleared';
-        mitigation.updated_at = new Date().toISOString();
-        mitigation.clear_reason = reason;
-        this.activeMitigations.set(mitigationId, mitigation);
-
-        if (this.expiryTimers.has(mitigationId)) {
-            clearTimeout(this.expiryTimers.get(mitigationId));
-            this.expiryTimers.delete(mitigationId);
-        }
-
-        return {
-            success: true,
-            mitigation: this.getMitigationSnapshot(mitigation)
-        };
-    }
-
-    async extendMitigation(mitigationId, durationMs) {
-        const mitigation = this.activeMitigations.get(mitigationId);
-        if (!mitigation) {
-            throw new Error(`Unknown mitigation_id: ${mitigationId}`);
-        }
-        if (!mitigation.auto_expire) {
-            throw new Error(`Mitigation ${mitigationId} is not auto-expiring`);
-        }
-
-        const extraMs = this.normalizeDurationMs(durationMs);
-        if (extraMs <= 0) {
-            throw new Error('duration_ms must be a positive number');
-        }
-
-        const currentExpiry = mitigation.expires_at ? new Date(mitigation.expires_at).getTime() : Date.now();
-        const baseTime = Math.max(currentExpiry, Date.now());
-        const newExpiryMs = baseTime + extraMs;
-
-        mitigation.expires_at = new Date(newExpiryMs).toISOString();
-        mitigation.duration_ms = (mitigation.duration_ms || 0) + extraMs;
-        mitigation.updated_at = new Date().toISOString();
-
-        this.activeMitigations.set(mitigationId, mitigation);
-        this.scheduleAutoExpiry(mitigationId);
-
-        return {
-            success: true,
-            mitigation: this.getMitigationSnapshot(mitigation)
-        };
     }
 
     getSimulatedTopology() {

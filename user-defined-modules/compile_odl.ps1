@@ -6,9 +6,6 @@ $SdkJar = "..\nis-thesis-sdk\out\nis-thesis-sdk.jar"
 $JsonJar = "..\ModuleRegistryLifecycleManager\lib\json-20231013.jar" 
 
 # Verify dependencies
-if (-not $JdkPath) { Write-Error "JAVA_HOME is not set"; exit 1 }
-if (-not (Test-Path (Join-Path $JdkPath "bin\javac.exe"))) { Write-Error "javac.exe not found under JAVA_HOME"; exit 1 }
-if (-not (Test-Path (Join-Path $JdkPath "bin\jar.exe"))) { Write-Error "jar.exe not found under JAVA_HOME"; exit 1 }
 if (-not (Test-Path $SdkJar)) { Write-Error "SDK JAR not found at $SdkJar"; exit 1 }
 if (-not (Test-Path $JsonJar)) { Write-Error "JSON JAR not found at $JsonJar"; exit 1 }
 
@@ -31,10 +28,10 @@ $sources = @(
     "src\main\java\com\nis1\thesis\udm\services\NetworkScannerService.java"
 )
 
-& (Join-Path $JdkPath "bin\javac.exe") -cp $Classpath -d $OutputDir $sources
+javac -cp $Classpath -d $OutputDir $sources
 
 # Package
 Write-Host "Packaging JAR..."
-& (Join-Path $JdkPath "bin\jar.exe") cf $JarFile -C $OutputDir .
+jar cf $JarFile -C $OutputDir .
 
 Write-Host "Build Complete: $JarFile"

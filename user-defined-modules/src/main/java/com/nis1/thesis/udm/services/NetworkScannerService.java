@@ -16,7 +16,7 @@ import java.util.concurrent.Future;
 
 /**
  * Service for active network scanning and topology discovery.
- * Ported from an earlier topology discovery implementation.
+ * Ported from odl-network-enforcer's TopologyDiscoveryHandler.
  */
 public class NetworkScannerService {
 

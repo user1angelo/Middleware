@@ -40,14 +40,4 @@ export const moduleAPI = {
   getHealth: () => api.get('/modules/health')
 };
 
-export const odlAPI = {
-  getTopology: () => api.get('/odl/topology'),
-  isolateHost: (payload) => api.post('/odl/isolate', payload),
-  removeIsolation: (payload) => api.post('/odl/remove-isolation', payload),
-  triggerScan: (payload) => api.post('/odl/scan', payload),
-  listMitigations: () => api.get('/odl/mitigations'),
-  clearMitigation: (id, payload = {}) => api.post(`/odl/mitigations/${id}/clear`, payload),
-  extendMitigation: (id, payload) => api.post(`/odl/mitigations/${id}/extend`, payload)
-};
-
 export default api;

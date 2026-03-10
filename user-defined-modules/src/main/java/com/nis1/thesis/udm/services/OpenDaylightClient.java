@@ -40,71 +40,24 @@ public class OpenDaylightClient {
      * @return true if successful
      */
     public boolean isolateHost(String targetIp) {
-        return isolateHost(targetIp, null);
-    }
+        String flowId = "isolate-" + targetIp;
+        String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
+                baseUrl, DEFAULT_NODE, DEFAULT_TABLE, flowId);
 
-    /**
-     * Isolate a host using flow IDs that are tied to a mitigation record.
-     */
-    public boolean isolateHost(String targetIp, String mitigationId) {
-        if (targetIp == null || targetIp.trim().isEmpty()) {
-            helper.log(moduleName, "ERROR", "Cannot isolate empty target host");
-            return false;
-        }
+        String jsonPayload = buildIsolationFlowJson(flowId, targetIp);
 
-        String flowBase = buildFlowBase(targetIp, mitigationId);
-        String srcFlowId = flowBase + "-src";
-        String dstFlowId = flowBase + "-dst";
-
-        boolean srcOk = putFlow(srcFlowId, buildIsolationFlowJson(srcFlowId, targetIp, true));
-        boolean dstOk = putFlow(dstFlowId, buildIsolationFlowJson(dstFlowId, targetIp, false));
-
-        return srcOk && dstOk;
+        return sendRestRequest("PUT", url, jsonPayload);
     }
 
     /**
      * Remove isolation for a host.
      */
     public boolean removeIsolation(String targetIp) {
-        return removeIsolation(targetIp, null);
-    }
-
-    /**
-     * Remove isolation flows associated with the given mitigation id.
-     */
-    public boolean removeIsolation(String targetIp, String mitigationId) {
-        if (targetIp == null || targetIp.trim().isEmpty()) {
-            helper.log(moduleName, "ERROR", "Cannot remove isolation for empty target host");
-            return false;
-        }
-
-        String flowBase = buildFlowBase(targetIp, mitigationId);
-        boolean srcOk = deleteFlow(flowBase + "-src");
-        boolean dstOk = deleteFlow(flowBase + "-dst");
-        return srcOk && dstOk;
-    }
-
-    private boolean putFlow(String flowId, String jsonPayload) {
+        String flowId = "isolate-" + targetIp;
         String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
                 baseUrl, DEFAULT_NODE, DEFAULT_TABLE, flowId);
-        return sendRestRequest("PUT", url, jsonPayload);
-    }
 
-    private boolean deleteFlow(String flowId) {
-        String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
-                baseUrl, DEFAULT_NODE, DEFAULT_TABLE, flowId);
         return sendRestRequest("DELETE", url, null);
-    }
-
-    private String buildFlowBase(String targetIp, String mitigationId) {
-        String idPart = mitigationId != null && !mitigationId.trim().isEmpty()
-                ? sanitize(mitigationId)
-                : "host-" + sanitize(targetIp);
-        return "soar-isolate-" + idPart;
-    }
-
-    private String sanitize(String value) {
-        return value.replaceAll("[^a-zA-Z0-9_-]", "_");
     }
 
     private boolean sendRestRequest(String method, String urlStr, String jsonBody) {
@@ -157,8 +110,7 @@ public class OpenDaylightClient {
         }
     }
 
-    private String buildIsolationFlowJson(String flowId, String ipAddress, boolean sourceMatch) {
-        String matchKey = sourceMatch ? "ipv4-source" : "ipv4-destination";
+    private String buildIsolationFlowJson(String flowId, String ipAddress) {
         // Construct JSON manually to avoid extra dependencies if possible,
         // or usage of org.json if available in classpath
         return "{\n" +
@@ -168,7 +120,7 @@ public class OpenDaylightClient {
                 "      \"table_id\": " + DEFAULT_TABLE + ",\n" +
                 "      \"priority\": " + ISOLATION_PRIORITY + ",\n" +
                 "      \"match\": {\n" +
-                "        \"" + matchKey + "\": \"" + ipAddress + "/32\",\n" +
+                "        \"ipv4-source\": \"" + ipAddress + "/32\",\n" +
                 "        \"ethernet-match\": {\n" +
                 "          \"ethernet-type\": {\n" +
                 "            \"type\": 2048\n" +
