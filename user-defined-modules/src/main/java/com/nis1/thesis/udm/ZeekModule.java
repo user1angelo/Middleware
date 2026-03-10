@@ -656,7 +656,8 @@ public class ZeekModule {
                 combined.contains("dharma") ||
                 combined.contains("ryuk") ||
                 combined.contains("eternalblue") ||
-                combined.contains("ms17-010")) {
+                combined.contains("ms17-010") ||
+                combined.contains("smb_mapping_event")) {
             return "ransomware";
         } else if (combined.contains("malware") || combined.contains("trojan")) {
             return "malware";
