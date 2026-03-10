@@ -41,8 +41,8 @@ steps:
           ports: [445]
           max_new_connections: 5
           time_window_seconds: 60
-          action_on_exceed: "BLOCK_AND_ALERT"
-          block_duration_seconds: 300
+          action_on_exceed: "ALERT_ONLY"
+          block_duration_seconds: 0
           alert_event_type: "SMB_SCANNING_DETECTED"
           alert_severity: "high"
           auto_trigger_mitigation: true
@@ -64,7 +64,7 @@ steps:
           protocol: "tcp"
           ports: [445, 139, 137, 138]
           direction: "both"
-          action: "DROP"
+          action: "LOG_AND_ALLOW"
           log: true
           priority: 950
           persistent: true
