@@ -94,9 +94,9 @@ public class WorkflowQueueListener {
                 // Extract alert details
                 if (alert.has("payload")) {
                     JSONObject payload = alert.getJSONObject("payload");
-                    System.out.println("📊 Alert Type: " + payload.optString("alert_type", "unknown"));
+                    System.out.println("📊 Alert Type: " + payload.optString("alert_type", payload.optString("alertType", "unknown")));
                     System.out.println("🎯 Severity: " + payload.optString("severity", "unknown"));
-                    System.out.println("⚡ Threat Score: " + payload.optInt("threat_score", 0));
+                    System.out.println("⚡ Threat Score: " + payload.optInt("threat_score", payload.optInt("threatScore", 0)));
                 }
                 
                 // Load workflows
@@ -207,12 +207,15 @@ public class WorkflowQueueListener {
         }
         
         JSONObject payload = alert.getJSONObject("payload");
-        if (!payload.has("alert_type")) {
-            return false;
-        }
         
-        String alertType = payload.getString("alert_type");
-        return alertType.toLowerCase().contains("ransomware");
+        String alertType = payload.optString("alert_type", payload.optString("alertType", ""));
+        String category = payload.optString("category", "");
+        String noteType = payload.optString("note_type", payload.optString("noteType", ""));
+
+        return alertType.toLowerCase().contains("ransomware") ||
+               category.toLowerCase().contains("ransomware") ||
+               noteType.toLowerCase().contains("ransomware") ||
+               noteType.toLowerCase().contains("smb_mapping_event");
     }
     
     /**

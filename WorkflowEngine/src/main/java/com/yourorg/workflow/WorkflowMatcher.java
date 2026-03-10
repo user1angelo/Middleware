@@ -61,12 +61,15 @@ public class WorkflowMatcher {
         }
         
         JSONObject payload = alert.getJSONObject("payload");
-        if (!payload.has("alert_type")) {
-            return false;
-        }
         
-        String alertType = payload.getString("alert_type");
-        return alertType.toLowerCase().contains("ransomware");
+        String alertType = payload.optString("alert_type", payload.optString("alertType", ""));
+        String category = payload.optString("category", "");
+        String noteType = payload.optString("note_type", payload.optString("noteType", ""));
+
+        return alertType.toLowerCase().contains("ransomware") ||
+               category.toLowerCase().contains("ransomware") ||
+               noteType.toLowerCase().contains("ransomware") ||
+               noteType.toLowerCase().contains("smb_mapping_event");
     }
     
     /**
@@ -85,6 +88,40 @@ public class WorkflowMatcher {
         
         // Parse condition for field checks
         // Example: "{{ trigger.payload.severity == 'high' and trigger.payload.threat_score >= 70 }}"
+        
+        // Check alert_type
+        if (condition.contains("alert_type") || condition.contains("alertType")) {
+            if (condition.contains("contains")) {
+                String expectedValue = extractValueFromCondition(condition, "alert_type", "contains");
+                if (expectedValue == null) {
+                    expectedValue = extractValueFromCondition(condition, "alertType", "contains");
+                }
+                
+                if (expectedValue != null) {
+                    String alertType = payload.optString("alert_type", payload.optString("alertType", ""));
+                    String category = payload.optString("category", "");
+                    String noteType = payload.optString("note_type", payload.optString("noteType", ""));
+                    
+                    boolean matches = alertType.toLowerCase().contains(expectedValue.toLowerCase()) ||
+                                      category.toLowerCase().contains(expectedValue.toLowerCase()) ||
+                                      noteType.toLowerCase().contains(expectedValue.toLowerCase());
+                    if (!matches) {
+                        return false;
+                    }
+                }
+            } else {
+                String expectedValue = extractValueFromCondition(condition, "alert_type", "==");
+                if (expectedValue == null) {
+                    expectedValue = extractValueFromCondition(condition, "alertType", "==");
+                }
+                if (expectedValue != null) {
+                    String alertType = payload.optString("alert_type", payload.optString("alertType", ""));
+                    if (!alertType.equalsIgnoreCase(expectedValue)) {
+                        return false;
+                    }
+                }
+            }
+        }
         
         // Check severity
         if (condition.contains("severity")) {
