@@ -178,9 +178,15 @@ public class WorkflowExecutor {
      */
     private String extractVariableValue(String variablePath, JSONObject alert) {
         try {
+            String originalPath = variablePath;
             // Remove "trigger." prefix if present
             if (variablePath.startsWith("trigger.")) {
                 variablePath = variablePath.substring(8);
+            }
+
+            // Remap "data." to "payload." if the payload exists but data doesn't
+            if (variablePath.startsWith("data.") && !alert.has("data") && alert.has("payload")) {
+                variablePath = "payload." + variablePath.substring(5);
             }
 
             String[] parts = variablePath.split("\\.");
@@ -189,17 +195,32 @@ public class WorkflowExecutor {
             for (String part : parts) {
                 if (current instanceof JSONObject) {
                     JSONObject obj = (JSONObject) current;
+                    
                     if (obj.has(part)) {
                         current = obj.get(part);
                     } else {
-                        return "[MISSING: " + variablePath + "]";
+                        // Fallback checking camelCase or snake_case equivalents
+                        boolean found = false;
+                        for (String key : obj.keySet()) {
+                            if (key.equalsIgnoreCase(part) || 
+                                key.replace("_", "").equalsIgnoreCase(part.replace("_", ""))) {
+                                current = obj.get(key);
+                                found = true;
+                                break;
+                            }
+                        }
+                        
+                        // Treat empty strings as missing so they don't break string builds
+                        if (!found || current == null) {
+                            return "[MISSING: " + originalPath + "]";
+                        }
                     }
                 } else {
                     return current.toString();
                 }
             }
 
-            return current.toString();
+            return current != null ? current.toString() : "[MISSING: " + originalPath + "]";
 
         } catch (Exception e) {
             return "[ERROR: " + variablePath + "]";
