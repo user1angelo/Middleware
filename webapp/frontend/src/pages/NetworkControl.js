@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../App.css';
+import { odlAPI } from '../services/api';
 
 function NetworkControl() {
     const [topology, setTopology] = useState(null);
@@ -11,16 +12,19 @@ function NetworkControl() {
     const [scanStatus, setScanStatus] = useState('');
     const [startIp, setStartIp] = useState('');
     const [isAutoScan, setIsAutoScan] = useState(false);
+    const [durationMinutes, setDurationMinutes] = useState(30);
+    const [autoExpire, setAutoExpire] = useState(true);
+    const [rollbackNote, setRollbackNote] = useState('Manual rollback from dashboard');
+    const [activeMitigations, setActiveMitigations] = useState([]);
+    const [mitigationError, setMitigationError] = useState('');
 
     const fetchTopology = async () => {
         // Silent loading for polling if we already have data
         if (!topology) setLoading(true);
         setError(null);
         try {
-            const response = await fetch('http://localhost:3001/api/odl/topology');
-            if (!response.ok) throw new Error('Failed to fetch topology');
-            const data = await response.json();
-            setTopology(data);
+            const response = await odlAPI.getTopology();
+            setTopology(response.data);
         } catch (err) {
             if (!topology) setError(err.message);
             console.error(err);
@@ -36,11 +40,7 @@ function NetworkControl() {
             const body = {};
             if (startIp) body.start_ip = startIp;
 
-            await fetch('http://localhost:3001/api/odl/scan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
+            await odlAPI.triggerScan(body);
 
             // Refresh topology shortly after triggering scan
             setTimeout(fetchTopology, 1000);
@@ -59,20 +59,18 @@ function NetworkControl() {
 
         try {
             setIsolateStatus('Sending command...');
-            const response = await fetch('http://localhost:3001/api/odl/isolate', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(selectedHost),
+            const response = await odlAPI.isolateHost({
+                ip: selectedHost.ip,
+                mac: selectedHost.mac,
+                auto_expire: autoExpire,
+                duration_ms: autoExpire ? Number(durationMinutes) * 60 * 1000 : 0,
+                rollback_note: rollbackNote
             });
 
-            const result = await response.json();
-            if (response.ok) {
-                setIsolateStatus('✅ Isolation command sent successfully!');
-            } else {
-                setIsolateStatus(`❌ Error: ${result.error}`);
-            }
+            setIsolateStatus(
+                `✅ Isolation command sent successfully! Mitigation ID: ${response.data.mitigation_id || 'n/a'}`
+            );
+            await fetchMitigations();
         } catch (err) {
             setIsolateStatus(`❌ Error: ${err.message}`);
         }
@@ -86,31 +84,68 @@ function NetworkControl() {
 
         try {
             setRemoveIsolationStatus('Sending command...');
-            const response = await fetch('http://localhost:3001/api/odl/remove-isolation', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(selectedHost),
+            await odlAPI.removeIsolation({
+                ip: selectedHost.ip,
+                mac: selectedHost.mac,
+                rollback_note: rollbackNote
             });
-
-            const result = await response.json();
-            if (response.ok) {
-                setRemoveIsolationStatus('✅ Remove isolation command sent successfully!');
-            } else {
-                setRemoveIsolationStatus(`❌ Error: ${result.error}`);
-            }
+            setRemoveIsolationStatus('✅ Remove isolation command sent successfully!');
+            await fetchMitigations();
         } catch (err) {
             setRemoveIsolationStatus(`❌ Error: ${err.message}`);
         }
     };
 
+    const fetchMitigations = async () => {
+        try {
+            const response = await odlAPI.listMitigations();
+            setActiveMitigations(response.data.mitigations || []);
+            setMitigationError('');
+        } catch (err) {
+            setMitigationError(err.message);
+        }
+    };
+
+    const handleClearMitigation = async (mitigationId) => {
+        try {
+            await odlAPI.clearMitigation(mitigationId, { rollback_note: rollbackNote });
+            await fetchMitigations();
+        } catch (err) {
+            setMitigationError(err.message);
+        }
+    };
+
+    const handleExtendMitigation = async (mitigationId, extraMinutes = 10) => {
+        try {
+            await odlAPI.extendMitigation(mitigationId, { duration_ms: extraMinutes * 60 * 1000 });
+            await fetchMitigations();
+        } catch (err) {
+            setMitigationError(err.message);
+        }
+    };
+
+    const formatCountdown = (expiresAt) => {
+        if (!expiresAt) {
+            return 'No expiry';
+        }
+        const remainingMs = new Date(expiresAt).getTime() - Date.now();
+        if (remainingMs <= 0) {
+            return 'Expired';
+        }
+        const totalSeconds = Math.floor(remainingMs / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}m ${seconds}s`;
+    };
+
     useEffect(() => {
         // 1. Initial fetch
         fetchTopology();
+        fetchMitigations();
 
         // 2. Poll Topology every 5 seconds (Reads ODL state)
         const topologyInterval = setInterval(fetchTopology, 5000);
+        const mitigationInterval = setInterval(fetchMitigations, 1000);
 
         // 3. Auto-Scan logic
         let scanInterval = null;
@@ -122,6 +157,7 @@ function NetworkControl() {
 
         return () => {
             clearInterval(topologyInterval);
+            clearInterval(mitigationInterval);
             if (scanInterval) clearInterval(scanInterval);
         };
     }, [isAutoScan]); // Re-run effect when isAutoScan changes
@@ -283,6 +319,36 @@ function NetworkControl() {
                         />
                     </div>
 
+                    <div className="form-group">
+                        <label>Auto-expire quarantine:</label>
+                        <input
+                            type="checkbox"
+                            checked={autoExpire}
+                            onChange={(e) => setAutoExpire(e.target.checked)}
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label>Duration (minutes):</label>
+                        <input
+                            type="number"
+                            min="1"
+                            value={durationMinutes}
+                            onChange={(e) => setDurationMinutes(e.target.value)}
+                            disabled={!autoExpire}
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label>Rollback note:</label>
+                        <input
+                            type="text"
+                            value={rollbackNote}
+                            onChange={(e) => setRollbackNote(e.target.value)}
+                            placeholder="Reason for rollback/clear"
+                        />
+                    </div>
+
                     <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                         <button onClick={handleIsolate} className="btn-danger">
                             🚨 ISOLATE HOST
@@ -295,6 +361,56 @@ function NetworkControl() {
 
                     {isolateStatus && <p style={{ marginTop: '10px', fontWeight: 'bold' }}>{isolateStatus}</p>}
                     {removeIsolationStatus && <p style={{ marginTop: '10px', fontWeight: 'bold' }}>{removeIsolationStatus}</p>}
+                </section>
+
+                <section className="card" style={{ marginTop: '20px' }}>
+                    <h2>⏱️ Active Mitigations</h2>
+                    {mitigationError && <p style={{ color: '#ff6b6b' }}>{mitigationError}</p>}
+
+                    {activeMitigations.length === 0 ? (
+                        <p>No active mitigations.</p>
+                    ) : (
+                        <table className="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Mitigation ID</th>
+                                    <th>Target</th>
+                                    <th>Status</th>
+                                    <th>Expiry</th>
+                                    <th>Countdown</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {activeMitigations.map((mitigation) => (
+                                    <tr key={mitigation.mitigation_id}>
+                                        <td>{mitigation.mitigation_id}</td>
+                                        <td>{mitigation.ip || mitigation.mac || 'Unknown'}</td>
+                                        <td>{mitigation.status}</td>
+                                        <td>{mitigation.expires_at || 'No expiry'}</td>
+                                        <td>{formatCountdown(mitigation.expires_at)}</td>
+                                        <td>
+                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                                <button
+                                                    className="btn-success-outline"
+                                                    onClick={() => handleClearMitigation(mitigation.mitigation_id)}
+                                                >
+                                                    Clear
+                                                </button>
+                                                <button
+                                                    className="btn-primary"
+                                                    onClick={() => handleExtendMitigation(mitigation.mitigation_id, 10)}
+                                                    disabled={!mitigation.auto_expire}
+                                                >
+                                                    +10m
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
                 </section>
             </div>
         </div>

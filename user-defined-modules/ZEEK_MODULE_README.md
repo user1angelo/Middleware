@@ -17,7 +17,7 @@ Zeek NSM → notice.log → ZeekModule → workflow_queue (RabbitMQ)
                                              ↓
                                     WorkflowEngine
                                              ↓
-                                    ODL Network Enforcer
+                                    OpenDaylightModule (SDK)
                                              ↓
                                     Host Isolation
 ```

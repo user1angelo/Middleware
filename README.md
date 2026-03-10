@@ -10,7 +10,7 @@ This Middleware project is a comprehensive security orchestration and automated 
 |-----------|-------------|----------|
 | **ThreatContextStore** | Ingests alerts from Wazuh, stores them in PostgreSQL, and handles queries. | `/ThreatContextStore` |
 | **WorkflowEngine** | Orchestrates response actions based on YAML workflow definitions triggered by alerts. | `/WorkflowEngine` |
-| **ODL Network Enforcer** | OpenDaylight module for SDN-based network enforcement (isolation, flow control). | `/user-defined-modules/odl-network-enforcer` |
+| **OpenDaylight SDK Module** | Canonical SDN enforcement module loaded by ModuleRegistry/Lifecycle Manager. | `/user-defined-modules/src/main/java/com/nis1/thesis/udm/OpenDaylightModule.java` |
 | **Web Dashboard** | Visualization interface for alerts and system status. | `/webapp` |
 | **NIS Thesis SDK** | Shared library for common data models and utilities. | `/nis-thesis-sdk` |
 
@@ -26,17 +26,18 @@ graph TD
     B --> C[ThreatContextStore]
     B --> D[WorkflowEngine]
     C -->|Store| E[(PostgreSQL)]
-    D -->|Commands| F(RabbitMQ: workflow_command_queue)
-    F --> G[ODL Network Enforcer]
-    G -->|OpenFlow| H[Network Switches]
+    D -->|Commands| F(RabbitMQ: workflow_response_queue)
+    F --> G[ModuleRegistry + SdkModuleHost]
+    G --> H[OpenDaylightModule (SDK)]
+    H -->|RESTCONF/OpenFlow| I[Network Switches]
 ```
 
 ### Data Flow
 1. **Detection**: Alerts are published to `alerts_queue`.
 2. **Analysis**: `ThreatContextStore` consumes alerts for storage and historical analysis.
 3. **Orchestration**: `WorkflowEngine` consumes the same alerts, matches them against Security Playbooks (YAML), and decides on a course of action.
-4. **Enforcement**: If an action is required (e.g., "Isolate Host"), a command is sent to `workflow_command_queue`.
-5. **Execution**: The `ODL Network Enforcer` picks up the command and pushes flow rules to the SDN switches.
+4. **Enforcement**: If an action is required (e.g., "Isolate Host"), a command is sent to `workflow_response_queue`.
+5. **Execution**: `ModuleRegistry` routes the command to the SDK `OpenDaylightModule`, which applies SDN flow rules.
 
 ---
 
@@ -75,9 +76,9 @@ javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
 cd ../WorkflowEngine
 javac -cp "lib/*;out" -d out src/main/java/com/yourorg/workflow/*.java
 
-# 4. Build Enforcer
-cd ../user-defined-modules/odl-network-enforcer
-mvn clean install
+# 4. Build OpenDaylight SDK module
+cd ../user-defined-modules
+powershell -ExecutionPolicy Bypass -File .\compile_odl.ps1
 ```
 
 ---
@@ -86,7 +87,8 @@ mvn clean install
 
 ### Running Unit Tests
 Each module has its own test suite.
-- **Enforcer**: `mvn test` in `odl-network-enforcer/impl`
+- **SDK module host/router**: compile check via `javac` in `ModuleRegistryLifecycleManager`
+- **OpenDaylight SDK module**: rebuild via `user-defined-modules/compile_odl.ps1`
 
 ### System Verification
 Use the `ThreatContextStoreTester` to generate synthetic alerts:

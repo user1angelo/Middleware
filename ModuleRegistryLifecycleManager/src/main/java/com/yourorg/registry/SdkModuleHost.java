@@ -141,7 +141,7 @@ public class SdkModuleHost {
     public void dispatch(JSONObject json) {
         try {
             String messageType = json.optString("message_type");
-            String eventType = mapMessageTypeToEventType(messageType);
+            String eventType = mapMessageTypeToEventType(json);
 
             if (eventType == null)
                 return; // Unknown or irrelevant message
@@ -149,7 +149,7 @@ public class SdkModuleHost {
             Object payload = null;
 
             // Deserialize based on event type
-            if ("INITIATE_MITIGATION".equals(eventType)) {
+            if ("INITIATE_MITIGATION".equals(eventType) || "REMOVE_MITIGATION".equals(eventType)) {
                 payload = parseMitigationCommand(json);
             } else if ("ODL_TOPOLOGY_DISCOVER".equals(eventType)) {
                 payload = json; // Pass full JSON
@@ -175,11 +175,19 @@ public class SdkModuleHost {
         }
     }
 
-    private String mapMessageTypeToEventType(String messageType) {
+    private String mapMessageTypeToEventType(JSONObject json) {
+        String messageType = json.optString("message_type");
+        String explicitEventType = json.optString("event_type", "");
+
         if ("odl.host.isolate".equals(messageType))
             return "INITIATE_MITIGATION"; // Map workflow command to SDK event
-        if ("workflow_command".equals(messageType))
-            return "INITIATE_MITIGATION"; // Workflow commands from CommandRoutingListener
+        if ("workflow_command".equals(messageType)) {
+            // Respect explicit workflow command event types when present.
+            if (!explicitEventType.isEmpty()) {
+                return explicitEventType;
+            }
+            return "INITIATE_MITIGATION";
+        }
         if ("workflow.command".equals(messageType))
             return "INITIATE_MITIGATION"; // Generic mitigation legacy
         if ("odl.topology.discover".equals(messageType))
@@ -218,6 +226,7 @@ public class SdkModuleHost {
 
         MitigationCommandData data = new MitigationCommandData(ip, action, reason);
         data.setWorkflowInstanceId(json.optString("event_id"));
+        data.setAdditionalParameters(payload.toString());
 
         return data;
     }

@@ -2,8 +2,15 @@ package com.nis1.thesis.udm;
 
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.json.JSONObject;
 
@@ -34,6 +41,10 @@ public class OpenDaylightModule implements PluggableModule {
     private NetworkScannerService scanner;
     private OpenDaylightClient odlClient;
 
+    private final Map<String, ActiveMitigation> activeMitigations = new ConcurrentHashMap<>();
+    private final Map<String, ScheduledFuture<?>> mitigationTimers = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService mitigationScheduler = Executors.newSingleThreadScheduledExecutor();
+
     // Module identity
     private String moduleId = "odl_sdn_01";
     private String moduleName = "OpenDaylight SDN Module";
@@ -44,6 +55,22 @@ public class OpenDaylightModule implements PluggableModule {
     private String odlPassword = "admin";
 
     private volatile boolean running = false;
+
+    private static class ActiveMitigation {
+        private final String mitigationId;
+        private final String targetHost;
+        private final String owner;
+        private final long createdAtMs;
+        private volatile long expiresAtMs;
+
+        ActiveMitigation(String mitigationId, String targetHost, String owner, long createdAtMs, long expiresAtMs) {
+            this.mitigationId = mitigationId;
+            this.targetHost = targetHost;
+            this.owner = owner;
+            this.createdAtMs = createdAtMs;
+            this.expiresAtMs = expiresAtMs;
+        }
+    }
 
     @Override
     public String getName() {
@@ -80,6 +107,10 @@ public class OpenDaylightModule implements PluggableModule {
     @Override
     public void shutdown() {
         running = false;
+        mitigationTimers.values().forEach(timer -> timer.cancel(false));
+        mitigationTimers.clear();
+        activeMitigations.clear();
+        mitigationScheduler.shutdownNow();
         helper.log(getName(), "INFO", "Shutting down OpenDaylightModule");
     }
 
@@ -99,19 +130,27 @@ public class OpenDaylightModule implements PluggableModule {
             MitigationCommandData command = (MitigationCommandData) data;
             String targetHost = command.getTargetHost();
             MitigationAction action = command.getAction();
+            JSONObject payload = parseCommandPayload(command);
+            String mitigationId = payload.optString("mitigation_id", "mit-" + UUID.randomUUID());
+            String owner = payload.optString("owner", "workflow");
+            long durationMs = extractDurationMs(payload);
+            boolean autoExpire = payload.optBoolean("auto_expire", false);
+
+            if ((targetHost == null || targetHost.isEmpty()) && payload.has("targetHost")) {
+                targetHost = payload.optString("targetHost");
+            }
 
             helper.log(getName(), "INFO", "Received mitigation request: " + action + " for " + targetHost);
-            helper.log(getName(), "DEBUG", "Full command data: " + command.toString()); // Assuming toString() is
-                                                                                        // useful, otherwise we trust
-                                                                                        // the fields
+            helper.log(getName(), "DEBUG", "Mitigation payload: " + payload);
 
             if (action == MitigationAction.BLOCK_IP ||
                     action == MitigationAction.QUARANTINE ||
                     action == MitigationAction.ISOLATE_VLAN) {
 
-                boolean success = odlClient.isolateHost(targetHost);
+                boolean success = odlClient.isolateHost(targetHost, mitigationId);
                 if (success) {
                     helper.log(getName(), "INFO", "Successfully isolated host: " + targetHost);
+                    registerMitigation(mitigationId, targetHost, owner, autoExpire, durationMs);
                 } else {
                     helper.log(getName(), "ERROR", "Failed to isolate host: " + targetHost);
                 }
@@ -138,13 +177,40 @@ public class OpenDaylightModule implements PluggableModule {
             }
 
             MitigationCommandData command = (MitigationCommandData) data;
+            JSONObject payload = parseCommandPayload(command);
+            String mitigationId = payload.optString("mitigation_id", null);
             String targetHost = command.getTargetHost();
+
+            if ((targetHost == null || targetHost.isEmpty()) && payload.has("targetHost")) {
+                targetHost = payload.optString("targetHost");
+            }
+
+            if (mitigationId != null && !mitigationId.isEmpty()) {
+                ActiveMitigation record = activeMitigations.get(mitigationId);
+                if (record == null) {
+                    helper.log(getName(), "WARN",
+                            "Ignoring remove request for unknown mitigation_id: " + mitigationId);
+                    return;
+                }
+                if (targetHost == null || targetHost.isEmpty()) {
+                    targetHost = record.targetHost;
+                }
+            }
+
+            if (targetHost == null || targetHost.isEmpty()) {
+                helper.log(getName(), "ERROR", "Cannot remove mitigation: missing target host");
+                return;
+            }
 
             helper.log(getName(), "INFO", "Received remove mitigation request for " + targetHost);
 
-            boolean success = odlClient.removeIsolation(targetHost);
+            boolean success = odlClient.removeIsolation(targetHost, mitigationId);
             if (success) {
                 helper.log(getName(), "INFO", "Successfully removed isolation from host: " + targetHost);
+                if (mitigationId != null && !mitigationId.isEmpty()) {
+                    cancelMitigationTimer(mitigationId);
+                    activeMitigations.remove(mitigationId);
+                }
             } else {
                 helper.log(getName(), "ERROR", "Failed to remove isolation from host: " + targetHost);
             }
@@ -408,6 +474,75 @@ public class OpenDaylightModule implements PluggableModule {
             moduleName = props.getProperty("module.name", moduleName);
         } catch (IOException e) {
             System.out.println("[OpenDaylightModule] Using default config");
+        }
+    }
+
+    private JSONObject parseCommandPayload(MitigationCommandData command) {
+        String raw = command.getAdditionalParameters();
+        if (raw == null || raw.trim().isEmpty()) {
+            return new JSONObject();
+        }
+
+        try {
+            return new JSONObject(raw);
+        } catch (Exception ignored) {
+            helper.log(getName(), "WARN", "Could not parse additional mitigation payload JSON");
+            return new JSONObject();
+        }
+    }
+
+    private long extractDurationMs(JSONObject payload) {
+        if (payload.has("duration_ms")) {
+            return payload.optLong("duration_ms", 0L);
+        }
+
+        JSONObject lifecycle = payload.optJSONObject("lifecycle");
+        if (lifecycle != null && lifecycle.has("duration_ms")) {
+            return lifecycle.optLong("duration_ms", 0L);
+        }
+
+        return 0L;
+    }
+
+    private void registerMitigation(String mitigationId, String targetHost, String owner, boolean autoExpire,
+            long durationMs) {
+        long now = Instant.now().toEpochMilli();
+        long expiresAt = autoExpire && durationMs > 0 ? now + durationMs : 0L;
+        ActiveMitigation mitigation = new ActiveMitigation(mitigationId, targetHost, owner, now, expiresAt);
+        activeMitigations.put(mitigationId, mitigation);
+
+        cancelMitigationTimer(mitigationId);
+        if (autoExpire && durationMs > 0) {
+            ScheduledFuture<?> timer = mitigationScheduler.schedule(() -> autoExpireMitigation(mitigationId),
+                    durationMs, TimeUnit.MILLISECONDS);
+            mitigationTimers.put(mitigationId, timer);
+            helper.log(getName(), "INFO", "Scheduled auto-expiry for mitigation " + mitigationId + " in "
+                    + durationMs + "ms");
+        }
+    }
+
+    private void cancelMitigationTimer(String mitigationId) {
+        ScheduledFuture<?> timer = mitigationTimers.remove(mitigationId);
+        if (timer != null) {
+            timer.cancel(false);
+        }
+    }
+
+    private void autoExpireMitigation(String mitigationId) {
+        ActiveMitigation mitigation = activeMitigations.get(mitigationId);
+        if (mitigation == null) {
+            return;
+        }
+
+        helper.log(getName(), "INFO", "Auto-expiring mitigation " + mitigationId + " for host "
+                + mitigation.targetHost);
+        boolean removed = odlClient.removeIsolation(mitigation.targetHost, mitigationId);
+        if (removed) {
+            activeMitigations.remove(mitigationId);
+            mitigationTimers.remove(mitigationId);
+            helper.log(getName(), "INFO", "Auto-expired mitigation removed: " + mitigationId);
+        } else {
+            helper.log(getName(), "ERROR", "Failed to auto-expire mitigation: " + mitigationId);
         }
     }
 }
