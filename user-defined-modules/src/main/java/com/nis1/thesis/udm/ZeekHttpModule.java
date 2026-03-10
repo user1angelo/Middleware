@@ -255,6 +255,7 @@ public class ZeekHttpModule implements PluggableModule {
 
         String subMessage = notice.sub != null ? notice.sub : "";
         if (notice.path != null && !notice.path.isEmpty()) {
+            System.out.println("[ZeekHttpModule][DEBUG] Received SMB mapping path: " + notice.path);
             subMessage = subMessage.isEmpty() ? "Path: " + notice.path : subMessage + " | Path: " + notice.path;
         }
         payload.setSubMessage(subMessage);
@@ -309,13 +310,12 @@ public class ZeekHttpModule implements PluggableModule {
 
     private String determineSeverity(String noteType, String message, String path) {
         String combined = (noteType + " " + (message != null ? message : "")).toLowerCase();
-        boolean isIpcShare = path != null && path.toUpperCase().contains("IPC$");
 
         if (combined.contains("ransomware") ||
                 combined.contains("malware") ||
                 combined.contains("eternalblue") ||
                 combined.contains("wannacry") ||
-                (combined.contains("smb_mapping_event") && isIpcShare) ||
+                combined.contains("smb_mapping_event") ||
                 combined.contains("c2")) {
             return "critical";
         } else if (combined.contains("scan::port_scan") ||
@@ -332,13 +332,15 @@ public class ZeekHttpModule implements PluggableModule {
 
     private String categorizeFromNote(String noteType, String message, String path) {
         String combined = (noteType + " " + (message != null ? message : "")).toLowerCase();
-        boolean isIpcShare = path != null && path.toUpperCase().contains("IPC$");
+        if (path != null && !path.isEmpty()) {
+            helper.log(getName(), "DEBUG", "Categorizing with SMB path: " + path);
+        }
 
         if (combined.contains("ransomware") ||
                 combined.contains("wannacry") ||
                 combined.contains("eternalblue") ||
                 combined.contains("ms17-010") ||
-                (combined.contains("smb_mapping_event") && isIpcShare)) {
+                combined.contains("smb_mapping_event")) {
             return "ransomware";
         } else if (combined.contains("malware") || combined.contains("trojan")) {
             return "malware";
