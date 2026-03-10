@@ -45,6 +45,7 @@ public class ModuleRegistryMain {
         System.out.println("\n🔌 Initializing SDK-based modules from classpath...");
         sdkModuleHost = new SdkModuleHost();
         sdkModuleHost.setModuleRegistry(registry); // Connect to registry for auto-registration
+        sdkModuleHost.initRabbitMq(); // Add this line
         sdkModuleHost.initializeModules();
 
         // Create component instances

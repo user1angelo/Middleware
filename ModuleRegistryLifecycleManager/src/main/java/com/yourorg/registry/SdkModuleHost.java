@@ -33,19 +33,63 @@ public class SdkModuleHost {
     private final RealCoreSystemApi api = new RealCoreSystemApi();
     private ModuleRegistry registry; // Reference to registry for auto-registration
 
-    /**
-     * Real implementation of CoreSystemApi that manages subscriptions.
-     */
     private static class RealCoreSystemApi implements CoreSystemApi {
         // pattern -> list of listeners
         private final Map<String, List<Consumer<Event<?>>>> listeners = new ConcurrentHashMap<>();
 
+        private com.rabbitmq.client.Channel channel;
+        private String workflowQueue;
+
+        public void initRabbitMq() {
+            try {
+                com.rabbitmq.client.ConnectionFactory factory = new com.rabbitmq.client.ConnectionFactory();
+                factory.setHost(ConfigLoader.getRabbitMQHost());
+                factory.setPort(ConfigLoader.getRabbitMQPort());
+                factory.setUsername(ConfigLoader.getRabbitMQUser());
+                factory.setPassword(ConfigLoader.getRabbitMQPassword());
+
+                com.rabbitmq.client.Connection connection = factory.newConnection();
+                this.channel = connection.createChannel();
+                this.workflowQueue = ConfigLoader.getWorkflowQueueName();
+                this.channel.queueDeclare(workflowQueue, true, false, false, null);
+                System.out.println("[SdkModuleHost] RabbitMQ connection initialized for publishing events.");
+            } catch (Exception e) {
+                System.err.println("[SdkModuleHost] Failed to initialize RabbitMQ connection: " + e.getMessage());
+            }
+        }
+
         @Override
         public void publishEvent(Event<?> event) {
             System.out.println("[SdkModuleHost] Module published event: " + event.getType());
-            // In a full implementation, this would route back to RabbitMQ/ModuleRegistry
-            // For now, we assume UDM -> System communication is mostly System -> UDM
-            // commands
+
+            try {
+                // Only forward alerts or predefined types
+                if (event.getType().startsWith("alerts.")) {
+                    JSONObject alert = new JSONObject();
+                    alert.put("message_type", "alert");
+                    alert.put("event_id", event.getId());
+                    alert.put("timestamp", event.getTimestamp().toString());
+                    alert.put("event_type", event.getType());
+                    alert.put("source_module", "SdkModuleHost");
+
+                    // Serialize payload
+                    com.google.gson.Gson gson = new com.google.gson.Gson();
+                    String payloadStr = gson.toJson(event.getData());
+                    alert.put("payload", new JSONObject(payloadStr));
+
+                    if (channel != null && workflowQueue != null) {
+                        channel.basicPublish("", workflowQueue, null,
+                                alert.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                        System.out.println(
+                                "[SdkModuleHost] Forwarded alert to RabbitMQ workflow_queue: " + event.getType());
+                    } else {
+                        System.err.println("[SdkModuleHost] RabbitMQ channel not initialized. Cannot forward alert.");
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("[SdkModuleHost] Error publishing event to RabbitMQ: " + e.getMessage());
+                e.printStackTrace();
+            }
         }
 
         @Override
@@ -183,6 +227,10 @@ public class SdkModuleHost {
      */
     public void setModuleRegistry(ModuleRegistry registry) {
         this.registry = registry;
+    }
+
+    public void initRabbitMq() {
+        api.initRabbitMq();
     }
 
     public void initializeModules() {
