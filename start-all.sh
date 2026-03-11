@@ -26,17 +26,17 @@ trap cleanup SIGINT SIGTERM
 
 echo "🚀 [1/5] Starting Threat Context Store..."
 cd "$SCRIPT_DIR/ThreatContextStore"
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain > /dev/null 2>&1 &
+java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain > /dev/null 2>&1 &
 TCS_PID=$!
 
 echo "🚀 [2/5] Starting Workflow Engine..."
 cd "$SCRIPT_DIR/WorkflowEngine"
-java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain > /dev/null 2>&1 &
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain > /dev/null 2>&1 &
 WE_PID=$!
 
 echo "🚀 [3/5] Starting Module Registry (Loading ZeekHttpModule!)..."
 cd "$SCRIPT_DIR/ModuleRegistryLifecycleManager"
-java -cp "out:lib/*" com.yourorg.registry.ModuleRegistryMain > /dev/null 2>&1 &
+java -cp "target/classes:lib/*" com.yourorg.registry.ModuleRegistryMain > /dev/null 2>&1 &
 MR_PID=$!
 
 echo "🚀 [4/5] Starting Web Dashboard Backend..."

@@ -48,10 +48,10 @@ From this directory:
 
 ```bash
 # Windows
-javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 
 # Linux/macOS
-# javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+# javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 ```
 
 ## Run
@@ -60,10 +60,10 @@ Start the main entrypoint (listener + file watcher):
 
 ```bash
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain
 
 # Linux/macOS
-# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+# java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 ```
 
 ## Test

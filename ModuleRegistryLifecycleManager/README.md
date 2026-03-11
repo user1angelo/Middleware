@@ -180,7 +180,8 @@ psql -U postgres -f schema_registered_modules.sql
 ### 1. Start ModuleRegistry
 ```bash
 cd /home/keyanluwi/Documents/GitHub/Middleware/ModuleRegistryLifecycleManager
-java -cp "out:lib/*" com.yourorg.registry.ModuleRegistryMain
+mvn -q -DskipTests compile
+java -cp "target/classes:lib/*" com.yourorg.registry.ModuleRegistryMain
 ```
 
 **Expected Output:**
@@ -263,15 +264,16 @@ In the UDMTester terminal, choose option **2** to send 10 ransomware alerts.
    ```bash
    # Terminal 1: ThreatContextStore
    cd ThreatContextStore
-   java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+  java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
    
    # Terminal 2: WorkflowEngine
    cd WorkflowEngine
-   java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain
+  java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
    
    # Terminal 3: ModuleRegistry
    cd ModuleRegistryLifecycleManager
-   java -cp "out:lib/*" com.yourorg.registry.ModuleRegistryMain
+  mvn -q -DskipTests compile
+  java -cp "target/classes:lib/*" com.yourorg.registry.ModuleRegistryMain
    
    # Terminal 4: UDMTester
    cd ModuleRegistryLifecycleManager
@@ -383,7 +385,7 @@ ModuleRegistryLifecycleManager/
 │   ├── HealthMonitor.java                # Health checker
 │   └── ConfigLoader.java                 # Configuration
 ├── lib/                                  # JAR dependencies
-├── out/                                  # Compiled classes
+├── target/classes/                       # Compiled classes (canonical)
 ├── UDMTester.java                        # Sample UDM
 ├── schema_registered_modules.sql         # DB schema
 ├── SDK_Detailed_Context.md               # SDK documentation

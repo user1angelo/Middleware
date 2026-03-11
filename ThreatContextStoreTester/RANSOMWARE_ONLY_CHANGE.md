@@ -152,7 +152,7 @@ When you run TCSTester and send 10 alerts:
 ### 1. Start WorkflowEngine
 ```bash
 cd /home/keyanluwi/Documents/GitHub/Middleware/WorkflowEngine
-java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
 ```
 
 ### 2. Send Ransomware Alerts (New Terminal)

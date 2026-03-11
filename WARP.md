@@ -94,12 +94,12 @@ cd ThreatContextStore
 
 **On Linux/macOS:**
 ```bash
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 ```
 
 **On Windows:**
 ```bash
-javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 ```
 
 ### Run ThreatContextStore
@@ -110,10 +110,10 @@ This starts both RabbitMQListener and file-watching AlertProcessor as separate t
 
 ```bash
 # Linux/macOS
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain
 ```
 
 **Features:**
@@ -130,28 +130,28 @@ You can still run components separately for testing or specific use cases:
 **RabbitMQ Listener** (consumes from queue and stores in PostgreSQL):
 ```bash
 # Linux/macOS
-java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+java -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.RabbitMQListener
+java -cp "target/classes;lib/*" com.yourorg.middleware.RabbitMQListener
 ```
 
 **Alert Processor** (sends JSON files from messages/ to RabbitMQ - one-time):
 ```bash
 # Linux/macOS
-java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+java -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
 
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.AlertProcessor
+java -cp "target/classes;lib/*" com.yourorg.middleware.AlertProcessor
 ```
 
 **Query Demo** (export alerts by severity):
 ```bash
 # Linux/macOS
-java -cp "out:lib/*" com.yourorg.middleware.QueryDemo high
+java -cp "target/classes:lib/*" com.yourorg.middleware.QueryDemo high
 
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.QueryDemo high
+java -cp "target/classes;lib/*" com.yourorg.middleware.QueryDemo high
 ```
 
 Replace `high` with desired severity level (e.g., `medium`, `low`, `critical`).
@@ -159,10 +159,10 @@ Replace `high` with desired severity level (e.g., `medium`, `low`, `critical`).
 **ListenerWorker** (alternative listener implementation):
 ```bash
 # Linux/macOS
-java -cp "out:lib/*" com.yourorg.middleware.ListenerWorker
+java -cp "target/classes:lib/*" com.yourorg.middleware.ListenerWorker
 
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.ListenerWorker
+java -cp "target/classes;lib/*" com.yourorg.middleware.ListenerWorker
 ```
 
 ### Database Setup
@@ -414,7 +414,7 @@ SELECT * FROM wazuh_alerts WHERE payload->>'alert_type' = 'ransomware_detection'
    ```
 4. **Run ThreatContextStoreMain** (starts everything):
    ```bash
-   java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+  java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
    ```
    This will:
    - Process all existing files in `messages/`
@@ -430,7 +430,7 @@ SELECT * FROM wazuh_alerts WHERE payload->>'alert_type' = 'ransomware_detection'
 
 6. **Verify insertion** with QueryDemo or direct SQL queries:
    ```bash
-   java -cp "out:lib/*" com.yourorg.middleware.QueryDemo high
+  java -cp "target/classes:lib/*" com.yourorg.middleware.QueryDemo high
    ```
 
 **Alternative: Run Components Separately**
@@ -438,10 +438,10 @@ SELECT * FROM wazuh_alerts WHERE payload->>'alert_type' = 'ransomware_detection'
 If you need to run components individually:
 ```bash
 # Terminal 1: Start listener
-java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+java -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 
 # Terminal 2: Process files once
-java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+java -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
 ```
 
 ### Message Processing Guarantees

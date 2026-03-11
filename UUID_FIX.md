@@ -123,12 +123,12 @@ Store:  4e5344ac-7df0-4cc2-9714-2af6ba41a983 (as UUID in database)
 1. **Compile the updated code:**
    ```bash
    cd ThreatContextStore
-   javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+    javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
    ```
 
 2. **Copy compiled classes to remote machine:**
    ```bash
-   scp -r out/* user@remote-machine:/path/to/ThreatContextStore/out/
+    scp -r target/classes/* user@remote-machine:/path/to/ThreatContextStore/target/classes/
    ```
 
 3. **Restart ThreatContextStore on remote machine:**
@@ -138,7 +138,7 @@ Store:  4e5344ac-7df0-4cc2-9714-2af6ba41a983 (as UUID in database)
    kill <PID>
    
    # Restart
-   java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
+    java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
    ```
 
 ## Compatibility

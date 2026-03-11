@@ -156,7 +156,7 @@ psql -U postgres -f schema_registered_modules.sql
 
 ### Step 2: Start ModuleRegistry
 ```bash
-java -cp "out:lib/*" com.yourorg.registry.ModuleRegistryMain
+java -cp "target/classes:lib/*" com.yourorg.registry.ModuleRegistryMain
 ```
 
 ### Step 3: Start UDMTester (Different Terminal)
@@ -240,7 +240,7 @@ ModuleRegistryLifecycleManager/
 │   ├── CommandRoutingListener.java       ✅ Created (155 lines)
 │   ├── HealthMonitor.java                ✅ Created (100 lines)
 │   └── ConfigLoader.java                 ✅ Created (128 lines)
-├── out/com/yourorg/registry/*.class      ✅ Compiled (11 class files)
+├── target/classes/com/yourorg/registry/*.class      ✅ Compiled (11 class files)
 ├── lib/*.jar                             ✅ Copied (5 JAR files)
 ├── UDMTester.java                        ✅ Created (267 lines)
 ├── UDMTester.class                       ✅ Compiled

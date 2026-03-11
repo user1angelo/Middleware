@@ -82,13 +82,13 @@ java -cp ".:lib/*" WorkflowTester
 **Terminal 1: Start ModuleRegistry**
 ```bash
 cd /home/keyanluwi/Documents/GitHub/Middleware/ModuleRegistryLifecycleManager
-java -cp "out:lib/*" com.yourorg.registry.ModuleRegistryMain
+java -cp "target/classes:lib/*" com.yourorg.registry.ModuleRegistryMain
 ```
 
 **Terminal 2: Start WorkflowEngine**
 ```bash
 cd /home/keyanluwi/Documents/GitHub/Middleware/WorkflowEngine
-java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
 ```
 
 **Terminal 3: Run WorkflowTester**

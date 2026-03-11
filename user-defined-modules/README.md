@@ -48,7 +48,7 @@ Compile all UDM classes, ensuring both the Module Registry libraries and the
 ```bash
 cd user-defined-modules
 javac -cp "../ModuleRegistryLifecycleManager/lib/*:../nis-thesis-sdk/target/*" \
-  -d out src/main/java/com/nis1/thesis/udm/*.java
+  -d target/classes src/main/java/com/nis1/thesis/udm/*.java
 ```
 
 ### Running modules
@@ -56,7 +56,7 @@ javac -cp "../ModuleRegistryLifecycleManager/lib/*:../nis-thesis-sdk/target/*" \
 `PRTGModule` remains a standalone process and can be run directly:
 
 ```bash
-java -cp "out:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.PRTGModule
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.PRTGModule
 ```
 
 `OpenDaylightModule` is intended to be loaded by the Module Registry & Lifecycle

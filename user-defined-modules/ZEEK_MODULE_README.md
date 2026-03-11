@@ -94,15 +94,15 @@ mvn exec:java -Dexec.mainClass="com.nis1.thesis.udm.ZeekModule"
 cd /path/to/Middleware/user-defined-modules
 
 # Create output directory
-mkdir -p out
+mkdir -p target/classes
 
 # Compile
 javac -cp "../ModuleRegistryLifecycleManager/lib/*" \
-  -d out \
+  -d target/classes \
   src/main/java/com/nis1/thesis/udm/ZeekModule.java
 
 # Run
-java -cp "out:../ModuleRegistryLifecycleManager/lib/*:config" \
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*:config" \
   com.nis1.thesis.udm.ZeekModule
 ```
 

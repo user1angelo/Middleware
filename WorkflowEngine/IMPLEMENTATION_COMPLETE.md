@@ -112,7 +112,7 @@ WorkflowEngine/
 
 ```bash
 cd WorkflowEngine
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/workflow/*.java
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java
 # Exit code: 0 (SUCCESS)
 ```
 
@@ -126,7 +126,7 @@ No errors, no warnings. Ready to run!
 
 ```bash
 cd /home/keyanluwi/Documents/GitHub/Middleware/WorkflowEngine
-java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
 ```
 
 **Expected Output**:

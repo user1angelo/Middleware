@@ -1,0 +1,26 @@
+# Database Configuration
+db.host=192.168.159.68
+db.port=5432
+db.name=NIS1
+db.user=postgres
+db.password=postgres
+
+# RabbitMQ connection settings
+rabbitmq.host=localhost
+rabbitmq.port=5672
+rabbitmq.user=user
+rabbitmq.password=password
+rabbitmq.queue.name=alerts_queue
+rabbitmq.query_response_queue.name=query_response_queue
+
+listeners.tcp.default = 5672         
+listeners.ssl.default = 5671          
+
+ssl_options.cacertfile = /etc/rabbitmq/ca_cert.pem     
+ssl_options.certfile   = /etc/rabbitmq/server_cert.pem
+ssl_options.keyfile    = /etc/rabbitmq/server_key.pem
+
+# Strongly recommended for mutual TLS and proper verification:
+ssl_options.verify = verify_peer
+ssl_options.fail_if_no_peer_cert = true
+

@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  * queues
  * 
  * Usage:
- * java -cp "out:lib/*" com.yourorg.registry.ModuleRegistryMain
+ * java -cp "target/classes:lib/*" com.yourorg.registry.ModuleRegistryMain
  */
 public class ModuleRegistryMain {
 

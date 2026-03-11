@@ -110,7 +110,7 @@ The tester generates random alerts with:
 1. **Start ThreatContextStore:**
    ```bash
    cd ../ThreatContextStore
-   java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+   java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
    ```
 
 2. **Send Test Alerts (in another terminal):**

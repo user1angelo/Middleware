@@ -51,10 +51,10 @@ ThreatContextStore is `javac`-based.
 cd ThreatContextStore
 
 # Windows (PowerShell/cmd)
-javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 
 # Linux/macOS
-# javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+# javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 ```
 
 ## 4) Run
@@ -65,10 +65,10 @@ Start ThreatContextStore (runs the RabbitMQ listener + file-watcher sender in on
 cd ThreatContextStore
 
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain
 
 # Linux/macOS
-# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+# java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 ```
 
 You should see it connect using your configured values and begin waiting for messages from `rabbitmq.queue.name`.

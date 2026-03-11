@@ -445,14 +445,14 @@ Scenario C: RabbitMQ disconnection
 cd /home/keyanluwi/Documents/GitHub/Middleware/WorkflowEngine
 
 # Compile all Java files
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/workflow/*.java
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java
 ```
 
 ### Running
 
 ```bash
 # From WorkflowEngine directory
-java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
 ```
 
 **Expected Output**:
@@ -494,7 +494,7 @@ workflows.directory=workflows/ransomware
 **Terminal 1** - Start WorkflowEngine:
 ```bash
 cd WorkflowEngine
-java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
 ```
 
 **Terminal 2** - Send test alert:

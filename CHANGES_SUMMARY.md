@@ -103,7 +103,7 @@ ALTER TABLE wazuh_alerts ADD COLUMN IF NOT EXISTS response_status VARCHAR(50) DE
 ### ThreatContextStore
 ```bash
 cd ThreatContextStore
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 ```
 
 ### TCSTester
@@ -120,7 +120,7 @@ javac -cp "../ThreatContextStore/lib/*" TCSTester.java
 ```bash
 # Terminal 1: Start ThreatContextStore
 cd ThreatContextStore
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 
 # Terminal 2: Send 10 alerts
 cd ThreatContextStoreTester

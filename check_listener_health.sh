@@ -101,6 +101,6 @@ echo ""
 echo "To restart ThreatContextStore:"
 echo "  1. Find PID: ps aux | grep ThreatContextStore"
 echo "  2. Kill: kill <PID>"
-echo "  3. Restart: java -cp \"out:lib/*\" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt"
+echo "  3. Restart: java -cp \"target/classes:lib/*\" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt"
 echo ""
 

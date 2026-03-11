@@ -351,20 +351,20 @@ This means:
 ```bash
 # Windows (PowerShell)
 cd ThreatContextStore
-java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
+java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
 
 # Linux/macOS
 # cd ThreatContextStore
-# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
+# java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
 ```
 
 ### Save only errors:
 ```bash
 # Linux/macOS (bash process substitution)
-# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee >(grep -E "❌|⚠️" > errors.txt)
+# java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee >(grep -E "❌|⚠️" > errors.txt)
 
 # Windows (PowerShell)
-# java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
+# java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
 # Select-String -Path logs.txt -Pattern "❌","⚠️" | Set-Content errors.txt
 ```
 
@@ -412,10 +412,10 @@ The enhanced logging adds:
    cd ThreatContextStore
 
    # Windows (PowerShell)
-   java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
+   java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
 
    # Linux/macOS
-   # java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
+   # java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
    ```
 
 2. **Send test messages:**

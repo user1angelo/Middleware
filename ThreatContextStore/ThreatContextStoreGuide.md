@@ -137,16 +137,16 @@ cp config.properties.example config.properties
 psql -U postgres -h 192.168.171.145 -f schema.sql
 
 # 4. Compile the project
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 
 # 5. Start the listener (in one terminal)
-java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+java -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 
 # 6. Process some alerts (in another terminal)
-java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+java -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
 
 # 7. Query results
-java -cp "out:lib/*" com.yourorg.middleware.QueryDemo high
+java -cp "target/classes:lib/*" com.yourorg.middleware.QueryDemo high
 ```
 
 ---
@@ -230,7 +230,7 @@ int rabbitPort = ConfigLoader.getRabbitMqPort();
 
 **Run:**
 ```bash
-java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+java -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
 ```
 
 **Expected Output:**
@@ -270,7 +270,7 @@ java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
 
 **Run:**
 ```bash
-java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+java -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 ```
 
 **Expected Output:**
@@ -304,7 +304,7 @@ java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
 
 **Run:**
 ```bash
-java -cp "out:lib/*" com.yourorg.middleware.ListenerWorker
+java -cp "target/classes:lib/*" com.yourorg.middleware.ListenerWorker
 ```
 
 ### 5. WazuhAlertDao
@@ -347,13 +347,13 @@ SELECT 1 FROM wazuh_alerts WHERE event_id = ?;
 **Usage:**
 ```bash
 # Export high severity alerts
-java -cp "out:lib/*" com.yourorg.middleware.QueryDemo high
+java -cp "target/classes:lib/*" com.yourorg.middleware.QueryDemo high
 
 # Export medium severity alerts
-java -cp "out:lib/*" com.yourorg.middleware.QueryDemo medium
+java -cp "target/classes:lib/*" com.yourorg.middleware.QueryDemo medium
 
 # Export all critical alerts
-java -cp "out:lib/*" com.yourorg.middleware.QueryDemo critical
+java -cp "target/classes:lib/*" com.yourorg.middleware.QueryDemo critical
 ```
 
 **Output:**
@@ -387,14 +387,14 @@ If RabbitMQ is available, QueryDemo will also republish alerts to the queue. Thi
    ```bash
    # In terminal 1
    cd ThreatContextStore
-   java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+  java -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
    ```
 
 3. **Then start producers:**
    ```bash
    # In terminal 2
    cd ThreatContextStore
-   java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+  java -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
    ```
 
 ### Stopping the System
@@ -466,7 +466,7 @@ HAVING COUNT(*) > 1;
 2. Ensure RabbitMQListener is running
 3. Run AlertProcessor:
    ```bash
-   java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+  java -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
    ```
 4. Verify insertion:
    ```bash
@@ -480,7 +480,7 @@ HAVING COUNT(*) > 1;
 **Steps:**
 1. Export to JSON files:
    ```bash
-   java -cp "out:lib/*" com.yourorg.middleware.QueryDemo high
+  java -cp "target/classes:lib/*" com.yourorg.middleware.QueryDemo high
    ```
 2. Review files in `output/` directory
 3. Or query directly:
@@ -571,7 +571,7 @@ ls -lh lib/
 # slf4j: https://repo1.maven.org/maven2/org/slf4j/
 
 # Compile with correct classpath
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 ```
 
 #### Issue: Cannot Connect to PostgreSQL
@@ -684,7 +684,7 @@ RabbitMQ queue has messages but listener not processing
 ps aux | grep RabbitMQListener
 
 # 2. Restart listener
-java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+java -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 
 # 3. Check database connectivity
 psql -U postgres -h 192.168.171.145 -d wazuhdb -c "SELECT 1;"
@@ -708,10 +708,10 @@ java.lang.OutOfMemoryError: Java heap space
 **Solutions:**
 ```bash
 # Increase heap size
-java -Xmx2G -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+java -Xmx2G -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 
 # For very large datasets
-java -Xmx4G -Xms1G -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+java -Xmx4G -Xms1G -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
 ```
 
 #### Issue: JSON Parsing Errors
@@ -762,7 +762,7 @@ cp config.properties.example config.properties
 
 # Run from correct directory
 cd /path/to/ThreatContextStore
-java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+java -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 ```
 
 ### Debugging Tips
@@ -774,7 +774,7 @@ echo "org.slf4j.simpleLogger.defaultLogLevel=debug" > slf4j-simple.properties
 
 # Run with verbose logging
 java -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
-     -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+    -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 ```
 
 **Test Individual Components:**
@@ -853,12 +853,12 @@ public class CustomListener {
 
 2. Compile:
 ```bash
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/CustomListener.java
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/CustomListener.java
 ```
 
 3. Run:
 ```bash
-java -cp "out:lib/*" com.yourorg.middleware.CustomListener
+java -cp "target/classes:lib/*" com.yourorg.middleware.CustomListener
 ```
 
 ### Testing
@@ -1268,7 +1268,7 @@ Create `messages/query_example.json`:
 
 **Step 2: Process Query**
 ```bash
-java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+java -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
 ```
 
 **Step 3: RabbitMQListener Output**
@@ -1303,16 +1303,16 @@ All existing functionality is maintained:
 ```bash
 # 1. Recompile with new changes
 cd ThreatContextStore
-javac -cp "lib/*:out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 
 # 2. Recreate database with new schema
 psql -U postgres -h 192.168.171.145 -f schema.sql
 
 # 3. Start listener
-java -cp "out:lib/*" com.yourorg.middleware.RabbitMQListener
+java -cp "target/classes:lib/*" com.yourorg.middleware.RabbitMQListener
 
 # 4. Send alerts (in another terminal)
-java -cp "out:lib/*" com.yourorg.middleware.AlertProcessor
+java -cp "target/classes:lib/*" com.yourorg.middleware.AlertProcessor
 
 # 5. Verify in database
 psql -U postgres -h 192.168.171.145 -d wazuhdb -c "SELECT message_type, COUNT(*) FROM wazuh_alerts GROUP BY message_type;"

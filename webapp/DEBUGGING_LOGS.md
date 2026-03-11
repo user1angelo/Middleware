@@ -146,7 +146,7 @@ Test if the programs work when started manually:
 ```bash
 # Terminal 1 - Start ThreatContextStore manually
 cd /home/keyanluwi/Documents/GitHub/Middleware/ThreatContextStore
-java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 ```
 
 Do you see output? If yes, the program works. If no, there's a problem with the Java program itself.

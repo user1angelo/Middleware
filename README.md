@@ -69,11 +69,11 @@ mvn clean install
 cd ../ThreatContextStore
 # Linux/macOS: use ':' as classpath separator
 # Windows: use ';' as classpath separator
-javac -cp "lib/*;out" -d out src/main/java/com/yourorg/middleware/*.java
+javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 
 # 3. Build WorkflowEngine (javac-based)
 cd ../WorkflowEngine
-javac -cp "lib/*;out" -d out src/main/java/com/yourorg/workflow/*.java
+javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java
 
 # 4. Build Enforcer
 cd ../user-defined-modules/odl-network-enforcer

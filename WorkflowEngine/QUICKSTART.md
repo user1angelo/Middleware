@@ -32,10 +32,10 @@ WorkflowEngine loads `*.yml` / `*.yaml` from `workflows.directory` (default: `wo
 cd WorkflowEngine
 
 # Windows
-javac -cp "lib/*;out" -d out src/main/java/com/yourorg/workflow/*.java
+javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java
 
 # Linux/macOS
-# javac -cp "lib/*:out" -d out src/main/java/com/yourorg/workflow/*.java
+# javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java
 ```
 
 ## 4) Run
@@ -44,10 +44,10 @@ javac -cp "lib/*;out" -d out src/main/java/com/yourorg/workflow/*.java
 cd WorkflowEngine
 
 # Windows
-java -cp "out;lib/*" com.yourorg.workflow.WorkflowEngineMain
+java -cp "target/classes;lib/*" com.yourorg.workflow.WorkflowEngineMain
 
 # Linux/macOS
-# java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain
+# java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
 ```
 
 ## 5) Test (optional)
@@ -58,10 +58,10 @@ You can send test alerts and monitor output queues using the included tester:
 cd WorkflowEngine
 
 # Windows
-java -cp "out;lib/*" WorkflowTester
+java -cp "target/classes;lib/*" WorkflowTester
 
 # Linux/macOS
-# java -cp "out:lib/*" WorkflowTester
+# java -cp "target/classes:lib/*" WorkflowTester
 ```
 
 In the tester menu, use option **3** to monitor both `workflow_command_queue` and `workflow_response_queue`.

@@ -47,10 +47,10 @@ The new logging shows **every single message** with full details.
 cd ThreatContextStore
 
 # Windows: use PowerShell redirection to capture output
-java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
+java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath logs.txt
 
 # Linux/macOS
-# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
+# java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee logs.txt
 ```
 
 This saves all output (including errors) to `logs.txt` for review.
@@ -289,10 +289,10 @@ Send messages and watch logs in real-time:
 cd ThreatContextStore
 
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain
 
 # Linux/macOS
-# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+# java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 ```
 
 ### Terminal 2: Send test messages
@@ -372,10 +372,10 @@ psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f migration_add_query_columns.sql
 cd ThreatContextStore
 
 # Windows
-java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain
+java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain
 
 # Linux/macOS
-# java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain
+# java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain
 
 # 6. Test with 5 messages first
 cd ../ThreatContextStoreTester
@@ -399,10 +399,10 @@ If you've tried all the steps above and still have issues:
    cd ThreatContextStore
 
    # Windows (PowerShell)
-   java -cp "out;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath full_debug.log
+   java -cp "target/classes;lib/*" com.yourorg.middleware.ThreatContextStoreMain *>&1 | Tee-Object -FilePath full_debug.log
 
    # Linux/macOS
-   # java -cp "out:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee full_debug.log
+   # java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain 2>&1 | tee full_debug.log
    ```
 
 2. **Check the logs for:**

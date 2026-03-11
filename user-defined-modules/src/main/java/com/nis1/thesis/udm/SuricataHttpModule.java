@@ -1,25 +1,28 @@
 package com.nis1.thesis.udm;
 
-import com.nis1.thesis.sdk.CoreSystemApi;
-import com.nis1.thesis.sdk.Event;
-import com.nis1.thesis.sdk.ModuleHelper;
-import com.nis1.thesis.sdk.PluggableModule;
-import com.google.gson.Gson;
-import com.google.gson.annotations.SerializedName;
-import com.sun.net.httpserver.Headers;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpServer;
-
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import com.google.gson.Gson;
+import com.google.gson.annotations.SerializedName;
+import com.nis1.thesis.sdk.CoreSystemApi;
+import com.nis1.thesis.sdk.Event;
+import com.nis1.thesis.sdk.ModuleHelper;
+import com.nis1.thesis.sdk.PluggableModule;
+import com.sun.net.httpserver.Headers;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
 
 /**
  * SuricataHttpModule - SDK-based pluggable module that exposes an HTTP endpoint
@@ -55,6 +58,12 @@ public class SuricataHttpModule implements PluggableModule {
     private int minThreatScore = 75;
     private String severityThreshold = "high"; // "critical" or "high"
     private String[] highRiskCategories = { "ransomware", "apt_activity", "c2_communication", "malware" };
+
+    // Alert anti-spam / deduplication
+    private boolean dedupEnabled = true;
+    private long dedupWindowMs = 30000;
+    private int dedupCacheMaxSize = 5000;
+    private final ConcurrentHashMap<String, Long> recentAlertTimestamps = new ConcurrentHashMap<>();
 
     private volatile boolean running = false;
     private final Gson gson = new Gson();
@@ -137,8 +146,14 @@ public class SuricataHttpModule implements PluggableModule {
                     "ransomware,apt_activity,c2_communication,malware");
             highRiskCategories = categoriesStr.split(",");
 
+            dedupEnabled = Boolean.parseBoolean(props.getProperty("suricata.alert_dedup.enabled", "true"));
+            dedupWindowMs = Long.parseLong(props.getProperty("suricata.alert_dedup.window_ms", "30000"));
+            dedupCacheMaxSize = Integer.parseInt(props.getProperty("suricata.alert_dedup.max_entries", "5000"));
+
             System.out.println("[SuricataHttpModule] Loaded config from " + CONFIG_PATH);
             System.out.println("[SuricataHttpModule] Auto-isolation enabled: " + autoIsolateEnabled);
+            System.out.println("[SuricataHttpModule] Alert dedup enabled: " + dedupEnabled +
+                    " (window_ms=" + dedupWindowMs + ", max_entries=" + dedupCacheMaxSize + ")");
         } catch (IOException e) {
             System.out.println("[SuricataHttpModule][WARN] Could not load config (using defaults): " + e.getMessage());
         }
@@ -257,6 +272,16 @@ public class SuricataHttpModule implements PluggableModule {
         // Threat scores
         payload.setThreatScore(calculateThreatScore(severityLevel, category));
         payload.setConfidenceScore(95);
+
+        if (!shouldPublishAlert(payload)) {
+            helper.log(getName(), "DEBUG",
+                String.format("Suppressed duplicate Suricata alert in dedup window: %s [%s:%d -> %s:%d %s]",
+                    payload.getSignature(),
+                    payload.getSourceIp(), payload.getSourcePort(),
+                    payload.getDestinationIp(), payload.getDestinationPort(),
+                    payload.getProtocol()));
+            return;
+        }
 
         // Optional metadata
         if (eveLog.action != null) {
@@ -444,6 +469,53 @@ public class SuricataHttpModule implements PluggableModule {
 
     private String generateAlertId() {
         return "SURI-" + System.currentTimeMillis();
+    }
+
+    private boolean shouldPublishAlert(SuricataAlertData alert) {
+        if (!dedupEnabled || dedupWindowMs <= 0) {
+            return true;
+        }
+
+        long now = System.currentTimeMillis();
+        cleanupExpiredDedupEntries(now);
+
+        String alertKey = buildAlertDedupKey(alert);
+        Long previousTimestamp = recentAlertTimestamps.putIfAbsent(alertKey, now);
+        if (previousTimestamp == null) {
+            return true;
+        }
+
+        if ((now - previousTimestamp) <= dedupWindowMs) {
+            return false;
+        }
+
+        recentAlertTimestamps.put(alertKey, now);
+        return true;
+    }
+
+    private String buildAlertDedupKey(SuricataAlertData alert) {
+        String signature = alert.getSignature() != null ? alert.getSignature().toLowerCase() : "unknown_signature";
+        String sourceIp = alert.getSourceIp() != null ? alert.getSourceIp() : "unknown_src";
+        String destinationIp = alert.getDestinationIp() != null ? alert.getDestinationIp() : "unknown_dst";
+        String protocol = alert.getProtocol() != null ? alert.getProtocol().toUpperCase() : "UNKNOWN";
+
+        return signature + "|" + sourceIp + "|" + alert.getSourcePort() + "|" +
+                destinationIp + "|" + alert.getDestinationPort() + "|" + protocol;
+    }
+
+    private void cleanupExpiredDedupEntries(long now) {
+        long cutoff = now - dedupWindowMs;
+        Iterator<Map.Entry<String, Long>> iterator = recentAlertTimestamps.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, Long> entry = iterator.next();
+            if (entry.getValue() < cutoff) {
+                iterator.remove();
+            }
+        }
+
+        if (recentAlertTimestamps.size() > dedupCacheMaxSize) {
+            recentAlertTimestamps.clear();
+        }
     }
 
     /**

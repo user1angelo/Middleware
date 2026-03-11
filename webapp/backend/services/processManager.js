@@ -21,7 +21,7 @@ const PROCESSES = {
       ? path.resolve(BACKEND_ROOT, process.env.THREAT_CONTEXT_STORE_PATH)
       : path.join(MIDDLEWARE_ROOT, 'ThreatContextStore'),
     command: 'java',
-    args: ['-cp', `out${path.delimiter}lib/*`, 'com.yourorg.middleware.ThreatContextStoreMain'],
+    args: ['-cp', `target/classes${path.delimiter}lib/*`, 'com.yourorg.middleware.ThreatContextStoreMain'],
     process: null,
     status: 'stopped',
     logFile: null,
@@ -47,7 +47,7 @@ const PROCESSES = {
       ? path.resolve(BACKEND_ROOT, process.env.WORKFLOW_ENGINE_PATH)
       : path.join(MIDDLEWARE_ROOT, 'WorkflowEngine'),
     command: 'java',
-    args: ['-cp', `out${path.delimiter}lib/*`, 'com.yourorg.workflow.WorkflowEngineMain'],
+    args: ['-cp', `target/classes${path.delimiter}lib/*`, 'com.yourorg.workflow.WorkflowEngineMain'],
     process: null,
     status: 'stopped',
     logFile: null,
@@ -77,9 +77,9 @@ async function ensureLogsDir() {
 
 // Compile user-defined modules before starting them, so changes are always picked up
 async function compileUserDefinedModules() {
-  const compileCmd = `cd ${shellEscapeArg(UDM_ROOT)} && mkdir -p out && ` +
+  const compileCmd = `cd ${shellEscapeArg(UDM_ROOT)} && mkdir -p target/classes && ` +
     'javac -cp "../ModuleRegistryLifecycleManager/lib/*" ' +
-    '-d out src/main/java/com/nis1/thesis/udm/*.java';
+    '-d target/classes src/main/java/com/nis1/thesis/udm/*.java';
 
   console.log('[processManager] Compiling user-defined modules with:', compileCmd);
 
@@ -93,8 +93,8 @@ async function compileUserDefinedModules() {
 }
 
 async function compileThreatContextStore(tcsPath) {
-  const compileCmd = `cd ${shellEscapeArg(tcsPath)} && mkdir -p out && ` +
-    `javac -cp "lib/*${path.delimiter}out" -d out src/main/java/com/yourorg/middleware/*.java`;
+  const compileCmd = `cd ${shellEscapeArg(tcsPath)} && mkdir -p target/classes && ` +
+    `javac -cp "lib/*${path.delimiter}target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java`;
 
   console.log('[processManager] Compiling ThreatContextStore with:', compileCmd);
 
@@ -104,6 +104,21 @@ async function compileThreatContextStore(tcsPath) {
     const stdout = result.stdout || '';
     console.error('[processManager] ThreatContextStore compile failed:', stderr || stdout);
     throw new Error('Failed to compile ThreatContextStore. See backend logs for details.');
+  }
+}
+
+async function compileWorkflowEngine(workflowPath) {
+  const compileCmd = `cd ${shellEscapeArg(workflowPath)} && mkdir -p target/classes && ` +
+    `javac -cp "lib/*${path.delimiter}target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java`;
+
+  console.log('[processManager] Compiling WorkflowEngine with:', compileCmd);
+
+  const result = spawnSync('bash', ['-lc', compileCmd], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    const stderr = result.stderr || '';
+    const stdout = result.stdout || '';
+    console.error('[processManager] WorkflowEngine compile failed:', stderr || stdout);
+    throw new Error('Failed to compile WorkflowEngine. See backend logs for details.');
   }
 }
 
@@ -223,13 +238,15 @@ async function startProcess(processKey) {
 
   // For Java-based middleware components, enforce expected build layout
   if (proc.requiresJavaLayout !== false) {
-    const outDir = path.join(proc.cwd, 'out');
+    const classesDir = path.join(proc.cwd, 'target', 'classes');
     const libDir = path.join(proc.cwd, 'lib');
-    if (!fsSync.existsSync(outDir)) {
+    if (!fsSync.existsSync(classesDir)) {
       if (processKey === 'threatContextStore') {
         await compileThreatContextStore(proc.cwd);
+      } else if (processKey === 'workflowEngine') {
+        await compileWorkflowEngine(proc.cwd);
       } else {
-        throw new Error(`${proc.name} is not compiled. Missing 'out' directory at ${outDir}`);
+        throw new Error(`${proc.name} is not compiled. Missing 'target/classes' directory at ${classesDir}`);
       }
     }
     if (!fsSync.existsSync(libDir)) {
@@ -240,7 +257,8 @@ async function startProcess(processKey) {
   if (processKey === 'threatContextStore') {
     const mainClassFile = path.join(
       proc.cwd,
-      'out',
+      'target',
+      'classes',
       'com',
       'yourorg',
       'middleware',
@@ -248,6 +266,21 @@ async function startProcess(processKey) {
     );
     if (!fsSync.existsSync(mainClassFile)) {
       await compileThreatContextStore(proc.cwd);
+    }
+  }
+
+  if (processKey === 'workflowEngine') {
+    const mainClassFile = path.join(
+      proc.cwd,
+      'target',
+      'classes',
+      'com',
+      'yourorg',
+      'workflow',
+      'WorkflowEngineMain.class'
+    );
+    if (!fsSync.existsSync(mainClassFile)) {
+      await compileWorkflowEngine(proc.cwd);
     }
   }
 

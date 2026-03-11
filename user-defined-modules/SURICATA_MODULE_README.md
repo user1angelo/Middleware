@@ -83,11 +83,11 @@ From the `user-defined-modules` directory:
 cd /home/keyanluwi/Documents/GitHub/Middleware/user-defined-modules
 
 # Create output directory
-mkdir -p out
+mkdir -p target/classes
 
 # Compile
 javac -cp "../ModuleRegistryLifecycleManager/lib/*" \
-  -d out \
+  -d target/classes \
   src/main/java/com/nis1/thesis/udm/SuricataModule.java \
   src/main/java/com/nis1/thesis/udm/SuricataAlertData.java
 ```
@@ -99,7 +99,7 @@ javac -cp "../ModuleRegistryLifecycleManager/lib/*" \
 ls config/suricata-module.properties
 
 # Run the module
-java -cp "out:../ModuleRegistryLifecycleManager/lib/*" \
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" \
   com.nis1.thesis.udm.SuricataModule
 ```
 

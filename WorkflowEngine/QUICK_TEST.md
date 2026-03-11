@@ -14,7 +14,7 @@
 ## Terminal 1: ModuleRegistry
 ```bash
 cd /home/keyanluwi/Documents/GitHub/Middleware/ModuleRegistryLifecycleManager
-java -cp "out:lib/*" com.yourorg.registry.ModuleRegistryMain
+java -cp "target/classes:lib/*" com.yourorg.registry.ModuleRegistryMain
 ```
 
 Wait for:
@@ -25,7 +25,7 @@ Wait for:
 ## Terminal 2: WorkflowEngine
 ```bash
 cd /home/keyanluwi/Documents/GitHub/Middleware/WorkflowEngine
-java -cp "out:lib/*" com.yourorg.workflow.WorkflowEngineMain
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
 ```
 
 Wait for:

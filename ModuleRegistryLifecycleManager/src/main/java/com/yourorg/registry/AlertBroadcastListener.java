@@ -1,10 +1,14 @@
 package com.yourorg.registry;
 
-import com.rabbitmq.client.*;
-import org.json.JSONObject;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+
+import org.json.JSONObject;
+
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DeliverCallback;
 
 /**
  * AlertBroadcastListener - Receives alerts from UDMs and broadcasts them
@@ -110,6 +114,10 @@ public class AlertBroadcastListener implements Runnable {
                 break;
 
             case "alert":
+                if (isAlreadyBroadcasted(json)) {
+                    System.out.println("⏭️  Skipping already-broadcasted alert to prevent queue loop");
+                    break;
+                }
                 handleAlert(json, channel);
                 break;
 
@@ -179,6 +187,8 @@ public class AlertBroadcastListener implements Runnable {
             String alertsQueue = ConfigLoader.getAlertsQueueName();
             String workflowQueue = ConfigLoader.getWorkflowQueueName();
 
+            alert.put("broadcasted_by", "AlertBroadcastListener");
+
             byte[] messageBytes = alert.toString().getBytes(StandardCharsets.UTF_8);
 
             // Broadcast to alerts_queue (for ThreatContextStore)
@@ -201,6 +211,13 @@ public class AlertBroadcastListener implements Runnable {
             System.err.println("❌ Failed to broadcast alert: " + e.getMessage());
             throw e;
         }
+    }
+
+    /**
+     * Check if this alert has already been rebroadcast by this listener.
+     */
+    private boolean isAlreadyBroadcasted(JSONObject alert) {
+        return "AlertBroadcastListener".equals(alert.optString("broadcasted_by", ""));
     }
 
     /**

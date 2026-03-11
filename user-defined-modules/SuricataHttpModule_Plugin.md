@@ -117,9 +117,9 @@ From the repository root for `user-defined-modules`:
 cd user-defined-modules
 
 # 1) Compile SDK sources and Suricata HTTP module using the same javac
-mkdir -p out
+mkdir -p target/classes
 javac -cp "../ModuleRegistryLifecycleManager/lib/*" \
-  -d out \
+  -d target/classes \
   ../nis-thesis-sdk/src/main/java/com/nis1/thesis/sdk/*.java \
   src/main/java/com/nis1/thesis/udm/SuricataHttpModule.java \
   src/main/java/com/nis1/thesis/udm/SuricataAlertData.java

@@ -2,14 +2,17 @@ $ErrorActionPreference = "Stop"
 
 # Paths
 $SourcePath = "src\main\java"
-$OutputDir = "out"
-$JarFile = "out\nis-thesis-sdk.jar"
+$OutputDir = "target\classes"
+$JarFile = "target\nis-thesis-sdk-1.0-SNAPSHOT.jar"
 
 # Cleanup
 if (Test-Path $OutputDir) {
     Remove-Item -Recurse -Force $OutputDir
 }
-New-Item -ItemType Directory -Path $OutputDir
+if (-not (Test-Path "target")) {
+    New-Item -ItemType Directory -Path "target" | Out-Null
+}
+New-Item -ItemType Directory -Path $OutputDir | Out-Null
 
 # Compile
 Write-Host "Compiling SDK..."

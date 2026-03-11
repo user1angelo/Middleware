@@ -202,7 +202,7 @@ webapp/
 - Verify API_BASE in `frontend/src/services/api.js`
 
 ### Processes won't start
-- Ensure Java programs are compiled (`out/` directories exist)
+- Ensure Java programs are compiled (`target/classes` directories exist)
 - Check JAR files are in each program's `lib/` directory
 - Verify paths in backend `.env` file
 
