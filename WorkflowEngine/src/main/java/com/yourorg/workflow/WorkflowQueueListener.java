@@ -90,6 +90,8 @@ public class WorkflowQueueListener {
                     System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
                     return;
                 }
+
+                normalizeAlertForRansomwareWorkflows(alert);
                 
                 // Extract alert details
                 if (alert.has("payload")) {
@@ -211,11 +213,84 @@ public class WorkflowQueueListener {
         String alertType = payload.optString("alert_type", payload.optString("alertType", ""));
         String category = payload.optString("category", "");
         String noteType = payload.optString("note_type", payload.optString("noteType", ""));
+        String signature = payload.optString("signature", payload.optString("ruleDescription", ""));
 
         return alertType.toLowerCase().contains("ransomware") ||
                category.toLowerCase().contains("ransomware") ||
                noteType.toLowerCase().contains("ransomware") ||
-               noteType.toLowerCase().contains("smb_mapping_event");
+               noteType.toLowerCase().contains("smb_mapping_event") ||
+               isLikelyRansomwareByContent(alertType, category, noteType, signature) ||
+               isHighRiskSuricataAlert(alert);
+    }
+
+    private void normalizeAlertForRansomwareWorkflows(JSONObject alert) {
+        if (!alert.has("payload")) {
+            return;
+        }
+
+        JSONObject payload = alert.getJSONObject("payload");
+        String currentAlertType = payload.optString("alert_type", payload.optString("alertType", ""));
+        String currentAlertTypeLower = currentAlertType.toLowerCase();
+
+        if (currentAlertTypeLower.contains("ransomware")) {
+            return;
+        }
+
+        String category = payload.optString("category", "");
+        String noteType = payload.optString("note_type", payload.optString("noteType", ""));
+        String signature = payload.optString("signature", payload.optString("ruleDescription", ""));
+
+        if (isLikelyRansomwareByContent(currentAlertType, category, noteType, signature) || isHighRiskSuricataAlert(alert)) {
+            if (!currentAlertType.isBlank()) {
+                payload.put("original_alert_type", currentAlertType);
+            }
+            payload.put("alert_type", "ransomware_detection");
+            System.out.println("ℹ️  Normalized high-risk alert to alert_type=ransomware_detection for workflow matching");
+        }
+    }
+
+    private boolean isLikelyRansomwareByContent(String alertType, String category, String noteType, String signature) {
+        String combined = String.join(" ",
+                safeLower(alertType),
+                safeLower(category),
+                safeLower(noteType),
+                safeLower(signature));
+
+        return combined.contains("ransomware")
+                || combined.contains("eternalblue")
+                || combined.contains("ms17-010")
+                || combined.contains("wannacry")
+                || combined.contains("smb")
+                || combined.contains("lateral")
+                || combined.contains("trojan");
+    }
+
+    private boolean isHighRiskSuricataAlert(JSONObject alert) {
+        if (!alert.has("payload")) {
+            return false;
+        }
+
+        JSONObject payload = alert.getJSONObject("payload");
+        String eventType = safeLower(alert.optString("event_type", ""));
+        String sourceModule = safeLower(alert.optString("source_module", ""));
+        boolean isSuricataEvent = eventType.contains("suricata") || sourceModule.contains("suricata");
+
+        if (!isSuricataEvent) {
+            return false;
+        }
+
+        String severity = safeLower(payload.optString("severity", ""));
+        int threatScore = payload.optInt("threat_score", payload.optInt("threatScore", 0));
+        int confidenceScore = payload.optInt("confidence_score", payload.optInt("confidenceScore", 0));
+
+        boolean highSeverity = severity.equals("critical") || severity.equals("high");
+        boolean highScore = threatScore >= 80 || confidenceScore >= 80;
+
+        return highSeverity && highScore;
+    }
+
+    private String safeLower(String value) {
+        return value == null ? "" : value.toLowerCase();
     }
     
     /**

@@ -67,7 +67,13 @@ function NetworkControl() {
                 body: JSON.stringify(selectedHost),
             });
 
-            const result = await response.json();
+            const raw = await response.text();
+            let result = {};
+            try {
+                result = raw ? JSON.parse(raw) : {};
+            } catch (parseError) {
+                result = { error: raw || 'Unexpected non-JSON response from backend' };
+            }
             if (response.ok) {
                 setIsolateStatus('✅ Isolation command sent successfully!');
             } else {
@@ -94,7 +100,13 @@ function NetworkControl() {
                 body: JSON.stringify(selectedHost),
             });
 
-            const result = await response.json();
+            const raw = await response.text();
+            let result = {};
+            try {
+                result = raw ? JSON.parse(raw) : {};
+            } catch (parseError) {
+                result = { error: raw || 'Unexpected non-JSON response from backend' };
+            }
             if (response.ok) {
                 setRemoveIsolationStatus('✅ Remove isolation command sent successfully!');
             } else {

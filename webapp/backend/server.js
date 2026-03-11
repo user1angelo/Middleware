@@ -208,6 +208,16 @@ app.post('/api/odl/isolate', async (req, res) => {
   }
 });
 
+app.post('/api/odl/remove-isolation', async (req, res) => {
+  try {
+    const { ip, mac } = req.body;
+    const result = await odlService.removeIsolation(ip, mac);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/odl/scan', async (req, res) => {
   try {
     const { start_ip } = req.body;
