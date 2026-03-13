@@ -51,9 +51,11 @@ public class ConfigLoader {
         properties.setProperty("rabbitmq.password", "password");
 
         // Queue names
+        properties.setProperty("rabbitmq.udm_ingress_queue.name", "udm_ingress_queue");
         properties.setProperty("rabbitmq.workflow_queue.name", "workflow_queue");
         properties.setProperty("rabbitmq.alerts_queue.name", "alerts_queue");
         properties.setProperty("rabbitmq.workflow_response_queue.name", "workflow_response_queue");
+        properties.setProperty("rabbitmq.legacy_workflow_ingress.enabled", "true");
 
         // Health monitoring
         properties.setProperty("health.heartbeat_timeout_seconds", "120");
@@ -107,6 +109,14 @@ public class ConfigLoader {
     }
 
     // Queue names
+    public static String getUdmIngressQueueName() {
+        return properties.getProperty("rabbitmq.udm_ingress_queue.name", "udm_ingress_queue");
+    }
+
+    public static boolean isLegacyWorkflowIngressEnabled() {
+        return Boolean.parseBoolean(properties.getProperty("rabbitmq.legacy_workflow_ingress.enabled", "true"));
+    }
+
     public static String getWorkflowQueueName() {
         return properties.getProperty("rabbitmq.workflow_queue.name", "workflow_queue");
     }

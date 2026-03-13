@@ -2,6 +2,8 @@ package com.yourorg.registry;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import org.json.JSONObject;
 
@@ -47,15 +49,26 @@ public class AlertBroadcastListener implements Runnable {
         try (Connection connection = factory.newConnection();
                 Channel channel = connection.createChannel()) {
 
+            String udmIngressQueue = ConfigLoader.getUdmIngressQueueName();
             String workflowQueue = ConfigLoader.getWorkflowQueueName();
             String alertsQueue = ConfigLoader.getAlertsQueueName();
+            boolean legacyIngressEnabled = ConfigLoader.isLegacyWorkflowIngressEnabled();
+
+            Set<String> consumeQueues = new LinkedHashSet<>();
+            consumeQueues.add(udmIngressQueue);
+            if (legacyIngressEnabled) {
+                consumeQueues.add(workflowQueue);
+            }
 
             // Declare queues
-            channel.queueDeclare(workflowQueue, true, false, false, null);
+            for (String queueName : consumeQueues) {
+                channel.queueDeclare(queueName, true, false, false, null);
+            }
             channel.queueDeclare(alertsQueue, true, false, false, null);
+            channel.queueDeclare(workflowQueue, true, false, false, null);
 
             System.out.println("📡 AlertBroadcastListener started");
-            System.out.println("   Listening on: " + workflowQueue);
+            System.out.println("   Listening on ingress queue(s): " + String.join(", ", consumeQueues));
             System.out.println("   Broadcasting to: " + alertsQueue + " + " + workflowQueue);
 
             // Set up consumer
@@ -76,8 +89,10 @@ public class AlertBroadcastListener implements Runnable {
                 }
             };
 
-            channel.basicConsume(workflowQueue, false, deliverCallback, consumerTag -> {
-            });
+            for (String queueName : consumeQueues) {
+                channel.basicConsume(queueName, false, deliverCallback, consumerTag -> {
+                });
+            }
 
             // Keep running
             while (running) {

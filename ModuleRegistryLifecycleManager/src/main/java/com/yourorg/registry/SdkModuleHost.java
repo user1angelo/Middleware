@@ -38,7 +38,7 @@ public class SdkModuleHost {
         private final Map<String, List<Consumer<Event<?>>>> listeners = new ConcurrentHashMap<>();
 
         private com.rabbitmq.client.Channel channel;
-        private String workflowQueue;
+        private String udmIngressQueue;
 
         public void initRabbitMq() {
             try {
@@ -50,9 +50,10 @@ public class SdkModuleHost {
 
                 com.rabbitmq.client.Connection connection = factory.newConnection();
                 this.channel = connection.createChannel();
-                this.workflowQueue = ConfigLoader.getWorkflowQueueName();
-                this.channel.queueDeclare(workflowQueue, true, false, false, null);
-                System.out.println("[SdkModuleHost] RabbitMQ connection initialized for publishing events.");
+                this.udmIngressQueue = ConfigLoader.getUdmIngressQueueName();
+                this.channel.queueDeclare(udmIngressQueue, true, false, false, null);
+                System.out.println("[SdkModuleHost] RabbitMQ connection initialized for publishing events to ingress queue: "
+                    + udmIngressQueue);
             } catch (Exception e) {
                 System.err.println("[SdkModuleHost] Failed to initialize RabbitMQ connection: " + e.getMessage());
             }
@@ -77,11 +78,11 @@ public class SdkModuleHost {
                     String payloadStr = gson.toJson(event.getData());
                     alert.put("payload", new JSONObject(payloadStr));
 
-                    if (channel != null && workflowQueue != null) {
-                        channel.basicPublish("", workflowQueue, null,
+                        if (channel != null && udmIngressQueue != null) {
+                        channel.basicPublish("", udmIngressQueue, null,
                                 alert.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                        System.out.println(
-                                "[SdkModuleHost] Forwarded alert to RabbitMQ workflow_queue: " + event.getType());
+                        System.out.println("[SdkModuleHost] Forwarded alert to RabbitMQ ingress queue: "
+                            + event.getType());
                     } else {
                         System.err.println("[SdkModuleHost] RabbitMQ channel not initialized. Cannot forward alert.");
                     }
