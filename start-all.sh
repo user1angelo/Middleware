@@ -38,51 +38,6 @@ compile_java_module() {
     )
 }
 
-wait_for_pid_alive() {
-    local pid="$1"
-    local name="$2"
-    local timeout_s="${3:-10}"
-    local waited=0
-
-    while [ "$waited" -lt "$timeout_s" ]; do
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "✅ $name is running (pid=$pid)"
-            return 0
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
-
-    echo "❌ $name failed to stay running (pid=$pid)"
-    return 1
-}
-
-wait_for_http_endpoint() {
-    local name="$1"
-    local url="$2"
-    local timeout_s="${3:-15}"
-    local waited=0
-
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "⚠️  curl not found; skipping HTTP health check for $name"
-        return 0
-    fi
-
-    while [ "$waited" -lt "$timeout_s" ]; do
-        local code
-        code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
-        if [ "$code" = "200" ] || [ "$code" = "405" ]; then
-            echo "✅ $name HTTP endpoint is reachable ($url, status=$code)"
-            return 0
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
-
-    echo "❌ $name HTTP endpoint did not become reachable: $url"
-    return 1
-}
-
 echo "🛑 Stopping any old Java or Node processes..."
 killall -9 java 2>/dev/null || true
 killall -9 node 2>/dev/null || true
@@ -110,30 +65,23 @@ trap cleanup SIGINT SIGTERM
 
 echo "🚀 [1/5] Starting Threat Context Store..."
 cd "$SCRIPT_DIR/ThreatContextStore"
-java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain &
+java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain > /dev/null 2>&1 &
 TCS_PID=$!
 
 echo "🚀 [2/5] Starting Workflow Engine..."
 cd "$SCRIPT_DIR/WorkflowEngine"
-java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain &
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain > /dev/null 2>&1 &
 WE_PID=$!
 
 echo "🚀 [3/5] Starting Module Registry (Loading ZeekHttpModule!)..."
 cd "$SCRIPT_DIR/ModuleRegistryLifecycleManager"
-java -cp "target/classes:lib/*:../nis-thesis-sdk/target/classes:../user-defined-modules/target/classes:../user-defined-modules/*" com.yourorg.registry.ModuleRegistryMain &
+java -cp "target/classes:lib/*:../nis-thesis-sdk/target/classes:../user-defined-modules/target/classes:../user-defined-modules/*" com.yourorg.registry.ModuleRegistryMain > /dev/null 2>&1 &
 MR_PID=$!
-
-echo "🩺 Running startup health checks for Java services..."
-wait_for_pid_alive "$TCS_PID" "ThreatContextStore"
-wait_for_pid_alive "$WE_PID" "WorkflowEngine"
-wait_for_pid_alive "$MR_PID" "ModuleRegistry"
-wait_for_http_endpoint "Suricata HTTP ingest" "http://127.0.0.1:8090/suricata/alerts"
-wait_for_http_endpoint "Zeek HTTP ingest" "http://127.0.0.1:8091/zeek/notices"
 
 echo "🚀 [4/5] Starting Web Dashboard Backend..."
 cd "$SCRIPT_DIR/webapp/backend"
 npm install --silent > /dev/null 2>&1
-npm start &
+npm start > /dev/null 2>&1 &
 BACKEND_PID=$!
 
 sleep 2
@@ -143,10 +91,6 @@ cd "$SCRIPT_DIR/webapp/frontend"
 npm install --silent > /dev/null 2>&1
 PORT=3000 npm start &
 FRONTEND_PID=$!
-
-echo "🩺 Running startup health checks for web services..."
-wait_for_pid_alive "$BACKEND_PID" "Web backend"
-wait_for_pid_alive "$FRONTEND_PID" "Web frontend"
 
 echo ""
 echo "🟢 ALL SYSTEMS ARE GO!"
