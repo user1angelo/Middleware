@@ -80,6 +80,21 @@ public class OpenDaylightClient {
         String normalizedMitigationId = mitigationId != null && !mitigationId.isBlank()
                 ? mitigationId.trim()
                 : "mit-" + System.currentTimeMillis();
+        String targetKey = buildTargetKey(normalizedIp, normalizedMac);
+
+        MitigationRecord existingById = ownedMitigations.get(normalizedMitigationId);
+        if (existingById != null && !existingById.installedFlows.isEmpty()) {
+            helper.log(moduleName, "INFO", "Duplicate mitigation event ignored (already active): "
+                + normalizedMitigationId + " target=" + targetKey);
+            return true;
+        }
+
+        String activeMitigationForTarget = targetIndex.get(targetKey);
+        if (activeMitigationForTarget != null && !activeMitigationForTarget.equals(normalizedMitigationId)) {
+            helper.log(moduleName, "INFO", "Replacing existing mitigation " + activeMitigationForTarget
+                + " with " + normalizedMitigationId + " for target " + targetKey);
+            removeIsolation(normalizedIp, normalizedMac, activeMitigationForTarget);
+        }
 
         QuarantinePolicyOptions effectiveOptions = options != null ? options : new QuarantinePolicyOptions();
         Set<String> candidateNodes = resolveCandidateNodesForTarget(normalizedIp, normalizedMac);
@@ -110,7 +125,7 @@ public class OpenDaylightClient {
         }
 
         ownedMitigations.put(normalizedMitigationId, record);
-        targetIndex.put(buildTargetKey(normalizedIp, normalizedMac), normalizedMitigationId);
+        targetIndex.put(targetKey, normalizedMitigationId);
 
         helper.log(moduleName, "INFO", "Quarantine drop rules applied: " + installedCount
                 + " (mitigation_id=" + normalizedMitigationId + ", mode=" + effectiveOptions.mode
