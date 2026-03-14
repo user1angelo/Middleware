@@ -56,8 +56,6 @@ function NetworkControl() {
     const [containDhcp, setContainDhcp] = useState(true);
     const [autoExpire, setAutoExpire] = useState(true);
     const [durationSeconds, setDurationSeconds] = useState(900);
-    const [rollbackNote, setRollbackNote] = useState('');
-    const [autoRestoreTrigger, setAutoRestoreTrigger] = useState('false_positive_confirmed');
     const [activeMitigations, setActiveMitigations] = useState([]);
     const [mitigationStatus, setMitigationStatus] = useState('');
     const [loadingMitigations, setLoadingMitigations] = useState(false);
@@ -73,9 +71,7 @@ function NetworkControl() {
         },
         lifecycle: {
             auto_expire: autoExpire,
-            duration_seconds: Number(durationSeconds) || 0,
-            rollback_note: rollbackNote || null,
-            auto_restore_trigger: autoRestoreTrigger || null
+            duration_seconds: Number(durationSeconds) || 0
         }
     });
 
@@ -228,8 +224,7 @@ function NetworkControl() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    reason: 'manual-clear',
-                    rollback_note: rollbackNote || null
+                    reason: 'manual-clear'
                 })
             });
 
@@ -578,25 +573,6 @@ function NetworkControl() {
                             </label>
                         </div>
 
-                        <div className="form-group" style={{ marginTop: '10px' }}>
-                            <label>Auto-restore trigger (false-positive workflow):</label>
-                            <input
-                                type="text"
-                                value={autoRestoreTrigger}
-                                onChange={(e) => setAutoRestoreTrigger(e.target.value)}
-                                placeholder="false_positive_confirmed"
-                            />
-                        </div>
-
-                        <div className="form-group" style={{ marginTop: '10px' }}>
-                            <label>Rollback Note:</label>
-                            <input
-                                type="text"
-                                value={rollbackNote}
-                                onChange={(e) => setRollbackNote(e.target.value)}
-                                placeholder="Explain rollback intent"
-                            />
-                        </div>
                     </div>
 
                     <div style={{ marginTop: '12px', background: '#2d3748', padding: '12px', borderRadius: '8px', border: '1px solid #4a5568' }}>

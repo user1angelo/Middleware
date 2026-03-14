@@ -132,9 +132,14 @@ public class OpenDaylightClient {
 
         MitigationRecord record = ownedMitigations.get(resolvedMitigationId);
         if (record == null || record.installedFlows.isEmpty()) {
-            helper.log(moduleName, "WARN", "No owned flow records found for mitigation " + resolvedMitigationId);
-            ownedMitigations.remove(resolvedMitigationId);
-            return false;
+            helper.log(moduleName, "WARN", "No in-memory flow records found for mitigation " + resolvedMitigationId
+                    + "; falling back to prefix-based cleanup");
+            boolean fallbackRemoved = removeOwnedFlowsByMitigationPrefix(resolvedMitigationId);
+            if (fallbackRemoved) {
+                targetIndex.remove(buildTargetKey(normalizedIp, normalizedMac));
+                ownedMitigations.remove(resolvedMitigationId);
+            }
+            return fallbackRemoved;
         }
 
         boolean allRemovedOrAbsent = true;
@@ -150,10 +155,136 @@ public class OpenDaylightClient {
             targetIndex.remove(buildTargetKey(record.targetIp, record.targetMac));
             helper.log(moduleName, "INFO", "Removed system-owned quarantine rules for mitigation " + resolvedMitigationId);
         } else {
+            helper.log(moduleName, "WARN", "Some tracked flow deletions failed for mitigation " + resolvedMitigationId
+                    + "; attempting prefix-based cleanup fallback");
+            boolean fallbackRemoved = removeOwnedFlowsByMitigationPrefix(resolvedMitigationId);
+            if (fallbackRemoved) {
+                ownedMitigations.remove(resolvedMitigationId);
+                targetIndex.remove(buildTargetKey(record.targetIp, record.targetMac));
+                helper.log(moduleName, "INFO", "Fallback cleanup completed for mitigation " + resolvedMitigationId);
+                return true;
+            }
             helper.log(moduleName, "ERROR", "Failed to remove some system-owned quarantine rules for mitigation " + resolvedMitigationId);
         }
 
         return allRemovedOrAbsent;
+    }
+
+    private boolean removeOwnedFlowsByMitigationPrefix(String mitigationId) {
+        String mitigationPrefix = SYSTEM_FLOW_PREFIX + "_" + sanitize(mitigationId) + "_";
+        Set<String> nodes = fetchAllOpenFlowNodes();
+        if (nodes.isEmpty()) {
+            nodes.add(DEFAULT_NODE);
+        }
+
+        int deletionFailures = 0;
+        int matchedFlows = 0;
+
+        for (String nodeId : nodes) {
+            Set<String> flowIds = fetchConfiguredFlowIdsForNode(nodeId);
+            for (String flowId : flowIds) {
+                if (!flowId.startsWith(mitigationPrefix)) {
+                    continue;
+                }
+
+                matchedFlows++;
+                int responseCode = sendFlowRequest("DELETE", nodeId, flowId, null);
+                if (!((responseCode >= 200 && responseCode < 300) || responseCode == 404)) {
+                    deletionFailures++;
+                }
+            }
+        }
+
+        if (matchedFlows == 0) {
+            helper.log(moduleName, "INFO", "No configured flows matched mitigation prefix " + mitigationPrefix
+                    + " (already removed or never installed)");
+            return true;
+        }
+
+        if (deletionFailures > 0) {
+            helper.log(moduleName, "ERROR", "Prefix cleanup failed for " + deletionFailures + " flow(s) under " + mitigationPrefix);
+            return false;
+        }
+
+        helper.log(moduleName, "INFO", "Prefix cleanup removed " + matchedFlows + " flow(s) under " + mitigationPrefix);
+        return true;
+    }
+
+    private Set<String> fetchConfiguredFlowIdsForNode(String nodeId) {
+        Set<String> flowIds = new LinkedHashSet<>();
+        String tableUrl = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d", baseUrl, nodeId,
+                DEFAULT_TABLE);
+
+        try {
+            JSONObject response = fetchJson(tableUrl);
+            if (response == null) {
+                return flowIds;
+            }
+
+            JSONArray tables = response.optJSONArray("table");
+            if (tables == null) {
+                tables = response.optJSONArray("flow-node-inventory:table");
+            }
+
+            if (tables != null) {
+                for (int i = 0; i < tables.length(); i++) {
+                    JSONObject table = tables.optJSONObject(i);
+                    if (table == null) {
+                        continue;
+                    }
+
+                    JSONArray flows = table.optJSONArray("flow");
+                    if (flows == null) {
+                        flows = table.optJSONArray("flow-node-inventory:flow");
+                    }
+
+                    if (flows == null) {
+                        continue;
+                    }
+
+                    for (int j = 0; j < flows.length(); j++) {
+                        JSONObject flow = flows.optJSONObject(j);
+                        if (flow == null) {
+                            continue;
+                        }
+                        String id = flow.optString("id", "");
+                        if (!id.isBlank()) {
+                            flowIds.add(id);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            helper.log(moduleName, "WARN", "Failed to fetch configured flows for node " + nodeId + ": " + e.getMessage());
+        }
+
+        return flowIds;
+    }
+
+    private JSONObject fetchJson(String urlStr) {
+        try {
+            URL url = new URL(urlStr);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+
+            String auth = username + ":" + password;
+            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+            conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
+            conn.setRequestProperty("Accept", "application/json");
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode < 200 || responseCode >= 300) {
+                return null;
+            }
+
+            try (InputStream input = conn.getInputStream()) {
+                String body = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                return new JSONObject(body);
+            }
+        } catch (Exception e) {
+            helper.log(moduleName, "WARN", "GET JSON request failed for " + urlStr + ": " + e.getMessage());
+            return null;
+        }
     }
 
     private String normalizeIp(String ip) {

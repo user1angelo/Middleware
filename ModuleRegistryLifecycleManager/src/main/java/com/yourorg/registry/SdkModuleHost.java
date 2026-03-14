@@ -239,8 +239,6 @@ public class SdkModuleHost {
         additional.put("rollback_scope", payload.optString("rollback_scope", ""));
         additional.put("rollback_request_source", payload.optString("rollback_request_source", ""));
         additional.put("rollback_reason", payload.optString("rollback_reason", ""));
-        additional.put("rollback_note", payload.optString("rollback_note", ""));
-        additional.put("auto_restore_trigger", payload.optString("auto_restore_trigger", ""));
 
         JSONObject policy = payload.optJSONObject("quarantine_policy");
         if (policy != null) {

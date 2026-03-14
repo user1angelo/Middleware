@@ -210,8 +210,8 @@ app.post('/api/odl/isolate', async (req, res) => {
 
 app.post('/api/odl/remove-isolation', async (req, res) => {
   try {
-    const { ip, mac, mitigation_id, reason, rollback_note } = req.body;
-    const result = await odlService.removeIsolation(ip, mac, { mitigation_id, reason, rollback_note });
+    const { ip, mac, mitigation_id, reason } = req.body;
+    const result = await odlService.removeIsolation(ip, mac, { mitigation_id, reason });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -230,11 +230,10 @@ app.get('/api/odl/mitigations/active', async (req, res) => {
 app.post('/api/odl/mitigations/:id/clear', async (req, res) => {
   try {
     const mitigationId = req.params.id;
-    const { reason, rollback_note } = req.body || {};
+    const { reason } = req.body || {};
     const result = await odlService.clearMitigation({
       mitigationId,
-      reason: reason || 'manual-clear',
-      rollbackNote: rollback_note || null
+      reason: reason || 'manual-clear'
     });
     res.json(result);
   } catch (error) {

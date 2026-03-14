@@ -183,18 +183,10 @@ class OdlService {
         const durationSeconds = Number.isFinite(rawDuration)
             ? Math.min(Math.max(Math.floor(rawDuration), 0), MAX_DURATION_SECONDS)
             : DEFAULT_DURATION_SECONDS;
-        const rollbackNote = lifecycle.rollback_note && String(lifecycle.rollback_note).trim()
-            ? String(lifecycle.rollback_note).trim()
-            : null;
-        const autoRestoreTrigger = lifecycle.auto_restore_trigger && String(lifecycle.auto_restore_trigger).trim()
-            ? String(lifecycle.auto_restore_trigger).trim()
-            : null;
 
         return {
             auto_expire: autoExpire,
-            duration_seconds: durationSeconds,
-            rollback_note: rollbackNote,
-            auto_restore_trigger: autoRestoreTrigger
+            duration_seconds: durationSeconds
         };
     }
 
@@ -219,8 +211,7 @@ class OdlService {
         const timer = setTimeout(async () => {
             try {
                 await this.clearMitigationById(mitigationId, {
-                    reason: 'auto-expire',
-                    rollback_note: mitigation.lifecycle?.rollback_note || 'Auto-expire quarantine rollback'
+                    reason: 'auto-expire'
                 });
             } catch (error) {
                 console.error(`❌ Auto-expire rollback failed for ${mitigationId}:`, error.message);
@@ -287,7 +278,6 @@ class OdlService {
             rollback: {
                 system_owned_only: true,
                 last_reason: null,
-                last_note: null,
                 completed_at: null
             }
         };
@@ -331,20 +321,15 @@ class OdlService {
         }
 
         const reason = options.reason || 'manual-clear';
-        const rollbackNote = options.rollback_note || mitigation.lifecycle?.rollback_note || null;
-
         const rollbackPayload = {
             mitigation_id: mitigationId,
             rollback_reason: reason,
-            rollback_note: rollbackNote,
             rollback_scope: 'system_owned_only',
             rollback_request_source: 'webapp.network_control',
             quarantine_policy: mitigation.policy,
             lifecycle: {
                 auto_expire: false,
-                duration_seconds: 0,
-                rollback_note: rollbackNote,
-                auto_restore_trigger: mitigation.lifecycle?.auto_restore_trigger || null
+                duration_seconds: 0
             }
         };
 
@@ -353,13 +338,12 @@ class OdlService {
             mitigation.target.ip,
             mitigation.target.mac,
             'REMOVE_ISOLATION',
-            rollbackNote || 'Rollback mitigation via Network page',
+            'Rollback mitigation via Network page',
             rollbackPayload
         );
 
         mitigation.status = reason === 'auto-expire' ? 'expired' : 'cleared';
         mitigation.rollback.last_reason = reason;
-        mitigation.rollback.last_note = rollbackNote;
         mitigation.rollback.completed_at = new Date().toISOString();
         this.clearMitigationTimer(mitigationId);
         this.activeMitigations.delete(mitigationId);
@@ -371,11 +355,10 @@ class OdlService {
         };
     }
 
-    async clearMitigation({ mitigationId, ip, mac, reason, rollbackNote } = {}) {
+    async clearMitigation({ mitigationId, ip, mac, reason } = {}) {
         if (mitigationId) {
             return this.clearMitigationById(mitigationId, {
-                reason: reason || 'manual-clear',
-                rollback_note: rollbackNote || null
+                reason: reason || 'manual-clear'
             });
         }
 
@@ -385,8 +368,7 @@ class OdlService {
         }
 
         return this.clearMitigationById(mitigation.mitigation_id, {
-            reason: reason || 'manual-clear',
-            rollback_note: rollbackNote || null
+            reason: reason || 'manual-clear'
         });
     }
 
@@ -580,8 +562,7 @@ class OdlService {
                 quarantine_policy: policy,
                 lifecycle,
                 rollback_scope: 'system_owned_only',
-                rollback_request_source: 'webapp.network_control',
-                auto_restore_trigger: lifecycle.auto_restore_trigger || null
+                rollback_request_source: 'webapp.network_control'
             }
         );
 
@@ -605,8 +586,7 @@ class OdlService {
             mitigationId: options.mitigation_id,
             ip,
             mac,
-            reason: options.reason || 'manual-clear',
-            rollbackNote: options.rollback_note || 'Manual remove isolation via web Network page'
+            reason: options.reason || 'manual-clear'
         });
     }
 
