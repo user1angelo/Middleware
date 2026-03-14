@@ -142,7 +142,7 @@ public class SdkModuleHost {
     public void dispatch(JSONObject json) {
         try {
             String messageType = json.optString("message_type");
-            String eventType = mapMessageTypeToEventType(messageType);
+            String eventType = resolveEventType(json, messageType);
 
             if (eventType == null)
                 return; // Unknown or irrelevant message
@@ -150,7 +150,7 @@ public class SdkModuleHost {
             Object payload = null;
 
             // Deserialize based on event type
-            if ("INITIATE_MITIGATION".equals(eventType)) {
+            if ("INITIATE_MITIGATION".equals(eventType) || "REMOVE_MITIGATION".equals(eventType)) {
                 payload = parseMitigationCommand(json);
             } else if ("ODL_TOPOLOGY_DISCOVER".equals(eventType)) {
                 payload = json; // Pass full JSON
@@ -174,6 +174,17 @@ public class SdkModuleHost {
             System.err.println("[SdkModuleHost] Failed to dispatch message: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    private String resolveEventType(JSONObject json, String messageType) {
+        if ("workflow_command".equals(messageType) || "workflow.command".equals(messageType)) {
+            String explicitEventType = json.optString("event_type", "");
+            if (!explicitEventType.isBlank()) {
+                return explicitEventType;
+            }
+        }
+
+        return mapMessageTypeToEventType(messageType);
     }
 
     private String mapMessageTypeToEventType(String messageType) {

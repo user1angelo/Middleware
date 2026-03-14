@@ -13,6 +13,13 @@ const RABBITMQ_PORT = process.env.RABBITMQ_PORT || 5672;
 const RABBITMQ_USER = process.env.RABBITMQ_USER || 'user';
 const RABBITMQ_PASS = process.env.RABBITMQ_PASSWORD || 'password';
 const COMMAND_QUEUE = 'workflow_response_queue';
+const DEFAULT_NODE = process.env.ODL_DEFAULT_NODE || 'openflow:1';
+
+const LOCALIZATION_STATUS = {
+    RESOLVED: 'resolved',
+    PARTIAL: 'partial',
+    FALLBACK: 'fallback'
+};
 
 class OdlService {
     constructor() {
@@ -82,7 +89,7 @@ class OdlService {
 
     // Fetch topology from ODL Restconf
     async getTopology() {
-        return new Promise((resolve, reject) => {
+        const topology = await new Promise((resolve, reject) => {
             const options = {
                 hostname: ODL_HOST,
                 port: ODL_PORT,
@@ -119,57 +126,197 @@ class OdlService {
 
             req.end();
         });
+
+        const hosts = this.extractHostsFromTopology(topology);
+        return {
+            ...topology,
+            localization: {
+                default_node: DEFAULT_NODE,
+                source_of_truth: 'odl.topology'
+            },
+            hosts
+        };
+    }
+
+    buildWorkflowMessage(eventType, payload) {
+        const eventId = `manual-${eventType.toLowerCase()}-${Date.now()}`;
+        return {
+            message_type: 'workflow_command',
+            event_id: eventId,
+            timestamp: new Date().toISOString(),
+            event_type: eventType,
+            source_module: 'webapp.network_control',
+            payload
+        };
+    }
+
+    normalizeTarget(ip, mac) {
+        const normalizedIp = ip && String(ip).trim() ? String(ip).trim() : null;
+        const normalizedMac = mac && String(mac).trim() ? String(mac).trim().toLowerCase() : null;
+        return { ip: normalizedIp, mac: normalizedMac };
+    }
+
+    extractHostsFromTopology(topology) {
+        const result = [];
+        const topologies = topology?.['network-topology']?.topology || [];
+
+        for (const topo of topologies) {
+            const nodes = topo?.node || [];
+            for (const node of nodes) {
+                const nodeId = node?.['node-id'] || '';
+                if (!nodeId.startsWith('host:')) {
+                    continue;
+                }
+
+                const mac = nodeId.replace('host:', '').toLowerCase();
+                const addresses = node?.['host-tracker-service:addresses'] || [];
+                const ip = addresses?.[0]?.ip || 'Unknown';
+                const attachmentPoints = node?.['host-tracker-service:attachment-points'] || [];
+                const tpId = attachmentPoints?.[0]?.['tp-id'] || null;
+
+                const localization = this.deriveLocalization(tpId);
+
+                result.push({
+                    id: nodeId,
+                    mac,
+                    ip,
+                    attachment: tpId || 'Unknown',
+                    localization
+                });
+            }
+        }
+
+        return result;
+    }
+
+    deriveLocalization(tpId) {
+        if (!tpId || typeof tpId !== 'string') {
+            return {
+                status: LOCALIZATION_STATUS.PARTIAL,
+                confidence: 'low',
+                node: null,
+                port: null,
+                source_of_truth: 'odl.topology',
+                reason: 'Host attachment point not present in topology data'
+            };
+        }
+
+        const segments = tpId.split(':');
+        if (segments.length < 3 || !segments[0].startsWith('openflow')) {
+            return {
+                status: LOCALIZATION_STATUS.PARTIAL,
+                confidence: 'low',
+                node: null,
+                port: tpId,
+                source_of_truth: 'odl.topology',
+                reason: `Attachment point format not recognized: ${tpId}`
+            };
+        }
+
+        const port = segments[segments.length - 1];
+        const node = segments.slice(0, segments.length - 1).join(':');
+        return {
+            status: LOCALIZATION_STATUS.RESOLVED,
+            confidence: 'high',
+            node,
+            port,
+            source_of_truth: 'odl.topology'
+        };
+    }
+
+    resolveEndpointLocalization(topology, ip, mac) {
+        const hosts = topology?.hosts || this.extractHostsFromTopology(topology);
+        const normalized = this.normalizeTarget(ip, mac);
+
+        let matchedHost = null;
+        if (normalized.ip) {
+            matchedHost = hosts.find((host) => host.ip === normalized.ip);
+        }
+        if (!matchedHost && normalized.mac) {
+            matchedHost = hosts.find((host) => host.mac === normalized.mac);
+        }
+
+        if (!matchedHost) {
+            return {
+                status: LOCALIZATION_STATUS.FALLBACK,
+                confidence: 'low',
+                node: DEFAULT_NODE,
+                port: null,
+                source_of_truth: 'default_config',
+                fallback_reason: 'Host not found in ODL topology by IP or MAC'
+            };
+        }
+
+        const derived = matchedHost.localization || this.deriveLocalization(matchedHost.attachment);
+        if (derived.status === LOCALIZATION_STATUS.RESOLVED) {
+            return derived;
+        }
+
+        return {
+            status: LOCALIZATION_STATUS.FALLBACK,
+            confidence: 'low',
+            node: DEFAULT_NODE,
+            port: derived.port || null,
+            source_of_truth: 'default_config',
+            fallback_reason: derived.reason || 'Insufficient attachment details for target host',
+            partial_match: {
+                host_id: matchedHost.id,
+                ip: matchedHost.ip,
+                mac: matchedHost.mac
+            }
+        };
+    }
+
+    async publishManualWorkflowCommand(eventType, ip, mac, action, justification) {
+        await this.waitForChannel();
+        const topology = await this.getTopology();
+        const localization = this.resolveEndpointLocalization(topology, ip, mac);
+        const normalized = this.normalizeTarget(ip, mac);
+
+        const payload = {
+            targetHost: normalized.ip,
+            ip_address: normalized.ip,
+            mac_address: normalized.mac,
+            action,
+            priority: 'high',
+            sdn_controller: 'opendaylight',
+            justification,
+            localization
+        };
+
+        const command = this.buildWorkflowMessage(eventType, payload);
+
+        this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
+        console.log(`📤 Published ${eventType} command for ${normalized.ip || normalized.mac}`);
+
+        return {
+            status: 'sent',
+            success: true,
+            command,
+            localization
+        };
     }
 
     // Publish isolation command
     async isolateHost(ip, mac) {
-        await this.waitForChannel();
-
-        const command = {
-            message_type: 'workflow_command',
-            event_id: `manual-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            event_type: 'INITIATE_MITIGATION',
-            source_module: 'Webapp',
-            payload: {
-                targetHost: ip,
-                action: 'ISOLATE_VLAN',
-                priority: 'high',
-                sdn_controller: 'opendaylight',
-                justification: 'Manual isolation via Web Dashboard',
-                // Optional extras if needed for debugging
-                mac_address: mac
-            }
-        };
-
-        this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
-        console.log(`📤 Published manual isolation command for ${ip || mac}`);
-        return { status: 'sent', command };
+        return this.publishManualWorkflowCommand(
+            'INITIATE_MITIGATION',
+            ip,
+            mac,
+            'ISOLATE_VLAN',
+            'Manual isolation via web Network page'
+        );
     }
 
     // Publish remove isolation command
     async removeIsolation(ip, mac) {
-        await this.waitForChannel();
-
-        const command = {
-            message_type: 'workflow_command',
-            event_id: `manual-remove-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            event_type: 'REMOVE_MITIGATION',
-            source_module: 'Webapp',
-            payload: {
-                targetHost: ip,
-                action: 'REMOVE_ISOLATION',
-                priority: 'high',
-                sdn_controller: 'opendaylight',
-                justification: 'Manual removal of isolation via Web Dashboard',
-                mac_address: mac
-            }
-        };
-
-        this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
-        console.log(`📤 Published manual remove isolation command for ${ip || mac}`);
-        return { status: 'sent', command };
+        return this.publishManualWorkflowCommand(
+            'REMOVE_MITIGATION',
+            ip,
+            mac,
+            'REMOVE_ISOLATION',
+            'Manual remove isolation via web Network page'
+        );
     }
 
     // Publish topology discovery (scan) command
@@ -178,21 +325,13 @@ class OdlService {
 
         const payload = {
             type: 'ping_sweep',
-            target: 'all'
+            target: 'all',
+            start_ip: startIp || null,
+            action: 'TOPOLOGY_DISCOVER',
+            source_of_truth: 'odl.topology'
         };
 
-        if (startIp) {
-            payload.start_ip = startIp;
-        }
-
-        const command = {
-            message_type: 'odl.topology.discover',
-            event_id: `scan-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            event_type: 'ODL_TOPOLOGY_DISCOVER',
-            source_module: 'Webapp',
-            payload: payload
-        };
+        const command = this.buildWorkflowMessage('ODL_TOPOLOGY_DISCOVER', payload);
 
         this.channel.sendToQueue(COMMAND_QUEUE, Buffer.from(JSON.stringify(command)));
         console.log(`📤 Published network scan command${startIp ? ' for ' + startIp : ''}`);

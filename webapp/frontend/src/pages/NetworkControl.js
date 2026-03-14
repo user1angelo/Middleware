@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import '../App.css';
 
+const LOCALIZATION_STYLE = {
+    resolved: { background: 'rgba(72, 187, 120, 0.2)', color: '#48bb78', border: '1px solid rgba(72, 187, 120, 0.35)' },
+    partial: { background: 'rgba(246, 173, 85, 0.2)', color: '#f6ad55', border: '1px solid rgba(246, 173, 85, 0.35)' },
+    fallback: { background: 'rgba(252, 129, 129, 0.2)', color: '#fc8181', border: '1px solid rgba(252, 129, 129, 0.35)' }
+};
+
+const formatLocalizationStatus = (status) => {
+    if (!status) return 'Unknown';
+    return status.charAt(0).toUpperCase() + status.slice(1);
+};
+
 function NetworkControl() {
     const [topology, setTopology] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -11,6 +22,8 @@ function NetworkControl() {
     const [scanStatus, setScanStatus] = useState('');
     const [startIp, setStartIp] = useState('');
     const [isAutoScan, setIsAutoScan] = useState(false);
+    const [lastIsolationLocalization, setLastIsolationLocalization] = useState(null);
+    const [lastRemoveLocalization, setLastRemoveLocalization] = useState(null);
 
     const fetchTopology = async () => {
         // Silent loading for polling if we already have data
@@ -75,7 +88,14 @@ function NetworkControl() {
                 result = { error: raw || 'Unexpected non-JSON response from backend' };
             }
             if (response.ok) {
-                setIsolateStatus('✅ Isolation command sent successfully!');
+                setLastIsolationLocalization(result.localization || null);
+                const localization = result.localization;
+                if (localization?.node) {
+                    const portText = localization.port ? `:${localization.port}` : '';
+                    setIsolateStatus(`✅ Isolation command queued. Target ${localization.node}${portText} (${formatLocalizationStatus(localization.status)})`);
+                } else {
+                    setIsolateStatus('✅ Isolation command queued successfully!');
+                }
             } else {
                 setIsolateStatus(`❌ Error: ${result.error}`);
             }
@@ -108,7 +128,14 @@ function NetworkControl() {
                 result = { error: raw || 'Unexpected non-JSON response from backend' };
             }
             if (response.ok) {
-                setRemoveIsolationStatus('✅ Remove isolation command sent successfully!');
+                setLastRemoveLocalization(result.localization || null);
+                const localization = result.localization;
+                if (localization?.node) {
+                    const portText = localization.port ? `:${localization.port}` : '';
+                    setRemoveIsolationStatus(`✅ Remove isolation queued. Target ${localization.node}${portText} (${formatLocalizationStatus(localization.status)})`);
+                } else {
+                    setRemoveIsolationStatus('✅ Remove isolation command queued successfully!');
+                }
             } else {
                 setRemoveIsolationStatus(`❌ Error: ${result.error}`);
             }
@@ -140,7 +167,23 @@ function NetworkControl() {
 
     // Simple Topology Parser to extract hosts
     const getHosts = () => {
-        if (!topology || !topology['network-topology'] || !topology['network-topology'].topology) return [];
+        if (!topology) return [];
+
+        if (Array.isArray(topology.hosts)) {
+            return topology.hosts.map((host) => ({
+                ...host,
+                localization: host.localization || {
+                    status: 'partial',
+                    confidence: 'low',
+                    node: null,
+                    port: null,
+                    source_of_truth: 'odl.topology',
+                    reason: 'Localization metadata missing'
+                }
+            }));
+        }
+
+        if (!topology['network-topology'] || !topology['network-topology'].topology) return [];
 
         const hosts = [];
         const topo = topology['network-topology'].topology[0];
@@ -155,7 +198,15 @@ function NetworkControl() {
                     id: node['node-id'],
                     mac: mac,
                     ip: ip,
-                    attachment: node['host-tracker-service:attachment-points']?.[0]?.['tp-id'] || 'Unknown'
+                    attachment: node['host-tracker-service:attachment-points']?.[0]?.['tp-id'] || 'Unknown',
+                    localization: {
+                        status: 'partial',
+                        confidence: 'low',
+                        node: null,
+                        port: null,
+                        source_of_truth: 'odl.topology',
+                        reason: 'Legacy topology response without localization metadata'
+                    }
                 });
             }
         });
@@ -163,6 +214,9 @@ function NetworkControl() {
     };
 
     const hosts = getHosts();
+    const selectedHostLocalization = hosts.find(
+        (host) => (selectedHost.ip && host.ip === selectedHost.ip) || (selectedHost.mac && host.mac === selectedHost.mac)
+    )?.localization || null;
 
     return (
         <div className="App-page">
@@ -227,6 +281,7 @@ function NetworkControl() {
                                             <th>MAC Address</th>
                                             <th>IP Address</th>
                                             <th>Switch Port</th>
+                                            <th>Localization</th>
                                             <th>Action</th>
                                         </tr>
                                     </thead>
@@ -236,6 +291,25 @@ function NetworkControl() {
                                                 <td>{host.mac}</td>
                                                 <td>{host.ip}</td>
                                                 <td>{host.attachment}</td>
+                                                <td>
+                                                    <span
+                                                        style={{
+                                                            ...LOCALIZATION_STYLE[host.localization?.status || 'partial'],
+                                                            fontSize: '12px',
+                                                            borderRadius: '12px',
+                                                            padding: '4px 10px',
+                                                            fontWeight: 600,
+                                                            display: 'inline-block',
+                                                            marginBottom: '4px'
+                                                        }}
+                                                    >
+                                                        {formatLocalizationStatus(host.localization?.status || 'partial')}
+                                                    </span>
+                                                    <div style={{ fontSize: '12px', color: '#a0aec0' }}>
+                                                        Node: {host.localization?.node || 'N/A'}
+                                                        {host.localization?.port ? ` | Port: ${host.localization.port}` : ''}
+                                                    </div>
+                                                </td>
                                                 <td>
                                                     <div style={{ display: 'flex', gap: '5px' }}>
                                                         <button
@@ -305,8 +379,38 @@ function NetworkControl() {
                         </button>
                     </div>
 
+                    {selectedHostLocalization && (
+                        <div style={{ marginTop: '12px', fontSize: '13px', color: '#d1d5db' }}>
+                            Isolation target: {selectedHostLocalization.node || 'openflow:1'}
+                            {selectedHostLocalization.port ? `:${selectedHostLocalization.port}` : ''}
+                            {' '}
+                            <span
+                                style={{
+                                    ...LOCALIZATION_STYLE[selectedHostLocalization.status || 'partial'],
+                                    borderRadius: '10px',
+                                    padding: '2px 8px',
+                                    marginLeft: '8px',
+                                    fontSize: '11px',
+                                    fontWeight: 700
+                                }}
+                            >
+                                {formatLocalizationStatus(selectedHostLocalization.status || 'partial')}
+                            </span>
+                        </div>
+                    )}
+
                     {isolateStatus && <p style={{ marginTop: '10px', fontWeight: 'bold' }}>{isolateStatus}</p>}
+                    {lastIsolationLocalization?.fallback_reason && (
+                        <p style={{ marginTop: '6px', color: '#f6ad55' }}>
+                            Fallback reason: {lastIsolationLocalization.fallback_reason}
+                        </p>
+                    )}
                     {removeIsolationStatus && <p style={{ marginTop: '10px', fontWeight: 'bold' }}>{removeIsolationStatus}</p>}
+                    {lastRemoveLocalization?.fallback_reason && (
+                        <p style={{ marginTop: '6px', color: '#f6ad55' }}>
+                            Fallback reason: {lastRemoveLocalization.fallback_reason}
+                        </p>
+                    )}
                 </section>
             </div>
         </div>
