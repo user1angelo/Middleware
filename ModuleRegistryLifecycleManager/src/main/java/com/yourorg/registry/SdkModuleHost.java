@@ -231,6 +231,29 @@ public class SdkModuleHost {
         MitigationCommandData data = new MitigationCommandData(ip, action, reason);
         data.setWorkflowInstanceId(json.optString("event_id"));
 
+        JSONObject additional = new JSONObject();
+        additional.put("event_type", json.optString("event_type"));
+        additional.put("message_type", json.optString("message_type"));
+        additional.put("mac_address", payload.optString("mac_address", ""));
+        additional.put("mitigation_id", payload.optString("mitigation_id", ""));
+        additional.put("rollback_scope", payload.optString("rollback_scope", ""));
+        additional.put("rollback_request_source", payload.optString("rollback_request_source", ""));
+        additional.put("rollback_reason", payload.optString("rollback_reason", ""));
+        additional.put("rollback_note", payload.optString("rollback_note", ""));
+        additional.put("auto_restore_trigger", payload.optString("auto_restore_trigger", ""));
+
+        JSONObject policy = payload.optJSONObject("quarantine_policy");
+        if (policy != null) {
+            additional.put("quarantine_policy", policy);
+        }
+
+        JSONObject lifecycle = payload.optJSONObject("lifecycle");
+        if (lifecycle != null) {
+            additional.put("lifecycle", lifecycle);
+        }
+
+        data.setAdditionalParameters(additional.toString());
+
         return data;
     }
 

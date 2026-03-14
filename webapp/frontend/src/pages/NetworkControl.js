@@ -12,6 +12,33 @@ const formatLocalizationStatus = (status) => {
     return status.charAt(0).toUpperCase() + status.slice(1);
 };
 
+const POLICY_MODES = [
+    { value: 'strict_bi_directional', label: 'Strict Bi-Directional (IP + MAC when available)' },
+    { value: 'ip_only_bidirectional', label: 'IP-Only Bi-Directional' },
+    { value: 'mac_only_bidirectional', label: 'MAC-Only Bi-Directional' }
+];
+
+const formatSeconds = (seconds) => {
+    if (seconds === null || seconds === undefined) return 'No expiry';
+    const safe = Math.max(Number(seconds) || 0, 0);
+    const hours = Math.floor(safe / 3600);
+    const minutes = Math.floor((safe % 3600) / 60);
+    const secs = safe % 60;
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${secs}s`;
+    }
+    if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+    }
+    return `${secs}s`;
+};
+
+const getRemainingSecondsFromExpiry = (expiresAt) => {
+    if (!expiresAt) return null;
+    const delta = Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000);
+    return Math.max(delta, 0);
+};
+
 function NetworkControl() {
     const [topology, setTopology] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -24,6 +51,47 @@ function NetworkControl() {
     const [isAutoScan, setIsAutoScan] = useState(false);
     const [lastIsolationLocalization, setLastIsolationLocalization] = useState(null);
     const [lastRemoveLocalization, setLastRemoveLocalization] = useState(null);
+    const [policyMode, setPolicyMode] = useState('strict_bi_directional');
+    const [containArp, setContainArp] = useState(true);
+    const [containDhcp, setContainDhcp] = useState(true);
+    const [autoExpire, setAutoExpire] = useState(true);
+    const [durationSeconds, setDurationSeconds] = useState(900);
+    const [rollbackNote, setRollbackNote] = useState('');
+    const [autoRestoreTrigger, setAutoRestoreTrigger] = useState('false_positive_confirmed');
+    const [activeMitigations, setActiveMitigations] = useState([]);
+    const [mitigationStatus, setMitigationStatus] = useState('');
+    const [loadingMitigations, setLoadingMitigations] = useState(false);
+    const [extendSecondsById, setExtendSecondsById] = useState({});
+
+    const buildIsolationPayload = () => ({
+        ip: selectedHost.ip || null,
+        mac: selectedHost.mac || null,
+        policy: {
+            mode: policyMode,
+            contain_arp: containArp,
+            contain_dhcp: containDhcp
+        },
+        lifecycle: {
+            auto_expire: autoExpire,
+            duration_seconds: Number(durationSeconds) || 0,
+            rollback_note: rollbackNote || null,
+            auto_restore_trigger: autoRestoreTrigger || null
+        }
+    });
+
+    const fetchActiveMitigations = async (silent = false) => {
+        if (!silent) setLoadingMitigations(true);
+        try {
+            const response = await fetch('http://localhost:3001/api/odl/mitigations/active');
+            if (!response.ok) throw new Error('Failed to fetch active mitigations');
+            const data = await response.json();
+            setActiveMitigations(Array.isArray(data.mitigations) ? data.mitigations : []);
+        } catch (err) {
+            console.error('Active mitigations fetch failed:', err);
+        } finally {
+            if (!silent) setLoadingMitigations(false);
+        }
+    };
 
     const fetchTopology = async () => {
         // Silent loading for polling if we already have data
@@ -70,14 +138,20 @@ function NetworkControl() {
             return;
         }
 
+        if (autoExpire && (!Number(durationSeconds) || Number(durationSeconds) <= 0)) {
+            alert('Duration must be greater than 0 seconds when auto-expire is enabled');
+            return;
+        }
+
         try {
             setIsolateStatus('Sending command...');
+            const payload = buildIsolationPayload();
             const response = await fetch('http://localhost:3001/api/odl/isolate', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(selectedHost),
+                body: JSON.stringify(payload),
             });
 
             const raw = await response.text();
@@ -90,12 +164,14 @@ function NetworkControl() {
             if (response.ok) {
                 setLastIsolationLocalization(result.localization || null);
                 const localization = result.localization;
+                const policySummary = `${policyMode} | ARP=${containArp ? 'on' : 'off'} | DHCP=${containDhcp ? 'on' : 'off'}`;
                 if (localization?.node) {
                     const portText = localization.port ? `:${localization.port}` : '';
-                    setIsolateStatus(`✅ Isolation command queued. Target ${localization.node}${portText} (${formatLocalizationStatus(localization.status)})`);
+                    setIsolateStatus(`✅ Isolation command queued with ${policySummary}. Target ${localization.node}${portText} (${formatLocalizationStatus(localization.status)})`);
                 } else {
-                    setIsolateStatus('✅ Isolation command queued successfully!');
+                    setIsolateStatus(`✅ Isolation command queued with ${policySummary}.`);
                 }
+                fetchActiveMitigations(true);
             } else {
                 setIsolateStatus(`❌ Error: ${result.error}`);
             }
@@ -128,14 +204,15 @@ function NetworkControl() {
                 result = { error: raw || 'Unexpected non-JSON response from backend' };
             }
             if (response.ok) {
-                setLastRemoveLocalization(result.localization || null);
-                const localization = result.localization;
+                const localization = result.localization || result.publish?.localization || null;
+                setLastRemoveLocalization(localization);
                 if (localization?.node) {
                     const portText = localization.port ? `:${localization.port}` : '';
                     setRemoveIsolationStatus(`✅ Remove isolation queued. Target ${localization.node}${portText} (${formatLocalizationStatus(localization.status)})`);
                 } else {
-                    setRemoveIsolationStatus('✅ Remove isolation command queued successfully!');
+                    setRemoveIsolationStatus('✅ Remove isolation/rollback command queued successfully!');
                 }
+                fetchActiveMitigations(true);
             } else {
                 setRemoveIsolationStatus(`❌ Error: ${result.error}`);
             }
@@ -144,9 +221,75 @@ function NetworkControl() {
         }
     };
 
+    const handleClearMitigation = async (mitigationId) => {
+        try {
+            setMitigationStatus(`Clearing mitigation ${mitigationId}...`);
+            const response = await fetch(`http://localhost:3001/api/odl/mitigations/${mitigationId}/clear`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    reason: 'manual-clear',
+                    rollback_note: rollbackNote || null
+                })
+            });
+
+            const raw = await response.text();
+            let result = {};
+            try {
+                result = raw ? JSON.parse(raw) : {};
+            } catch (parseError) {
+                result = { error: raw || 'Unexpected non-JSON response from backend' };
+            }
+
+            if (response.ok) {
+                setMitigationStatus(`✅ Cleared mitigation ${mitigationId}`);
+                fetchActiveMitigations(true);
+            } else {
+                setMitigationStatus(`❌ Clear failed: ${result.error}`);
+            }
+        } catch (err) {
+            setMitigationStatus(`❌ Clear failed: ${err.message}`);
+        }
+    };
+
+    const handleExtendMitigation = async (mitigationId) => {
+        const extendSeconds = Number(extendSecondsById[mitigationId] || 300);
+        if (!extendSeconds || extendSeconds <= 0) {
+            alert('Extend seconds must be greater than 0');
+            return;
+        }
+
+        try {
+            setMitigationStatus(`Extending mitigation ${mitigationId}...`);
+            const response = await fetch(`http://localhost:3001/api/odl/mitigations/${mitigationId}/extend`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ extend_seconds: extendSeconds })
+            });
+
+            const raw = await response.text();
+            let result = {};
+            try {
+                result = raw ? JSON.parse(raw) : {};
+            } catch (parseError) {
+                result = { error: raw || 'Unexpected non-JSON response from backend' };
+            }
+
+            if (response.ok) {
+                setMitigationStatus(`✅ Extended mitigation ${mitigationId} by ${extendSeconds}s`);
+                fetchActiveMitigations(true);
+            } else {
+                setMitigationStatus(`❌ Extend failed: ${result.error}`);
+            }
+        } catch (err) {
+            setMitigationStatus(`❌ Extend failed: ${err.message}`);
+        }
+    };
+
     useEffect(() => {
         // 1. Initial fetch
         fetchTopology();
+        fetchActiveMitigations();
 
         // 2. Poll Topology every 5 seconds (Reads ODL state)
         const topologyInterval = setInterval(fetchTopology, 5000);
@@ -164,6 +307,14 @@ function NetworkControl() {
             if (scanInterval) clearInterval(scanInterval);
         };
     }, [isAutoScan]); // Re-run effect when isAutoScan changes
+
+    useEffect(() => {
+        const mitigationInterval = setInterval(() => {
+            fetchActiveMitigations(true);
+        }, 5000);
+
+        return () => clearInterval(mitigationInterval);
+    }, []);
 
     // Simple Topology Parser to extract hosts
     const getHosts = () => {
@@ -369,6 +520,98 @@ function NetworkControl() {
                         />
                     </div>
 
+                    <div className="form-group">
+                        <label>Policy Mode:</label>
+                        <select
+                            value={policyMode}
+                            onChange={(e) => setPolicyMode(e.target.value)}
+                            style={{ width: '100%', padding: '10px', borderRadius: '8px' }}
+                        >
+                            {POLICY_MODES.map((mode) => (
+                                <option key={mode.value} value={mode.value}>{mode.label}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '10px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                                type="checkbox"
+                                checked={containArp}
+                                onChange={(e) => setContainArp(e.target.checked)}
+                            />
+                            Contain ARP (default ON)
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                                type="checkbox"
+                                checked={containDhcp}
+                                onChange={(e) => setContainDhcp(e.target.checked)}
+                            />
+                            Contain DHCP (default ON)
+                        </label>
+                    </div>
+
+                    <div style={{ marginTop: '15px', borderTop: '1px solid #444', paddingTop: '15px' }}>
+                        <h3 style={{ margin: '0 0 10px 0' }}>Mitigation Lifecycle</h3>
+                        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={autoExpire}
+                                    onChange={(e) => setAutoExpire(e.target.checked)}
+                                />
+                                Auto-expire quarantine
+                            </label>
+
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                Duration (seconds):
+                                <input
+                                    type="number"
+                                    min="1"
+                                    value={durationSeconds}
+                                    disabled={!autoExpire}
+                                    onChange={(e) => setDurationSeconds(e.target.value)}
+                                    style={{ width: '120px', padding: '6px', borderRadius: '6px' }}
+                                />
+                            </label>
+                        </div>
+
+                        <div className="form-group" style={{ marginTop: '10px' }}>
+                            <label>Auto-restore trigger (false-positive workflow):</label>
+                            <input
+                                type="text"
+                                value={autoRestoreTrigger}
+                                onChange={(e) => setAutoRestoreTrigger(e.target.value)}
+                                placeholder="false_positive_confirmed"
+                            />
+                        </div>
+
+                        <div className="form-group" style={{ marginTop: '10px' }}>
+                            <label>Rollback Note:</label>
+                            <input
+                                type="text"
+                                value={rollbackNote}
+                                onChange={(e) => setRollbackNote(e.target.value)}
+                                placeholder="Explain rollback intent"
+                            />
+                        </div>
+                    </div>
+
+                    <div style={{ marginTop: '12px', background: '#2d3748', padding: '12px', borderRadius: '8px', border: '1px solid #4a5568' }}>
+                        <strong>Effective Policy Summary</strong>
+                        <div style={{ marginTop: '6px', fontSize: '13px' }}>
+                            Mode: {policyMode} | Bi-directional selectors: src+dst
+                        </div>
+                        <div style={{ fontSize: '13px' }}>
+                            Containment: ARP {containArp ? 'ON' : 'OFF'}, DHCP {containDhcp ? 'ON' : 'OFF'}
+                        </div>
+                        <div style={{ fontSize: '13px' }}>
+                            Lifecycle: {autoExpire ? `Auto-expire in ${durationSeconds}s` : 'No auto-expiry'}
+                        </div>
+                    </div>
+
                     <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                         <button onClick={handleIsolate} className="btn-danger">
                             🚨 ISOLATE HOST
@@ -411,6 +654,79 @@ function NetworkControl() {
                             Fallback reason: {lastRemoveLocalization.fallback_reason}
                         </p>
                     )}
+                </section>
+
+                <section className="card" style={{ marginTop: '20px', borderLeft: '5px solid #2b6cb0' }}>
+                    <h2>🧾 Active Mitigations</h2>
+                    {loadingMitigations ? <p>Loading active mitigations...</p> : null}
+                    {!loadingMitigations && activeMitigations.length === 0 ? <p>No active mitigations.</p> : null}
+
+                    {activeMitigations.length > 0 && (
+                        <table className="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Mitigation ID</th>
+                                    <th>Target</th>
+                                    <th>Policy</th>
+                                    <th>Status</th>
+                                    <th>Expiry</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {activeMitigations.map((item) => {
+                                    const remainingSeconds = getRemainingSecondsFromExpiry(item.expires_at);
+                                    return (
+                                        <tr key={item.mitigation_id}>
+                                            <td>{item.mitigation_id}</td>
+                                            <td>
+                                                {item.target?.ip || 'N/A'}
+                                                <br />
+                                                <span style={{ color: '#a0aec0', fontSize: '12px' }}>{item.target?.mac || 'N/A'}</span>
+                                            </td>
+                                            <td style={{ fontSize: '12px' }}>
+                                                {item.policy?.mode || 'strict_bi_directional'}
+                                                <br />
+                                                ARP: {item.policy?.contain_arp ? 'ON' : 'OFF'} | DHCP: {item.policy?.contain_dhcp ? 'ON' : 'OFF'}
+                                            </td>
+                                            <td>{item.status}</td>
+                                            <td>
+                                                {item.expires_at ? formatSeconds(remainingSeconds) : 'No expiry'}
+                                            </td>
+                                            <td>
+                                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                                    <button
+                                                        className="btn-success-outline"
+                                                        onClick={() => handleClearMitigation(item.mitigation_id)}
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                    <input
+                                                        type="number"
+                                                        min="30"
+                                                        value={extendSecondsById[item.mitigation_id] || 300}
+                                                        onChange={(e) => setExtendSecondsById({
+                                                            ...extendSecondsById,
+                                                            [item.mitigation_id]: e.target.value
+                                                        })}
+                                                        style={{ width: '90px', padding: '4px', borderRadius: '5px' }}
+                                                    />
+                                                    <button
+                                                        className="btn-primary"
+                                                        onClick={() => handleExtendMitigation(item.mitigation_id)}
+                                                    >
+                                                        Extend
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+
+                    {mitigationStatus && <p style={{ marginTop: '10px', fontWeight: 'bold' }}>{mitigationStatus}</p>}
                 </section>
             </div>
         </div>

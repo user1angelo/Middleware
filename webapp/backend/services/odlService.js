@@ -14,6 +14,12 @@ const RABBITMQ_USER = process.env.RABBITMQ_USER || 'user';
 const RABBITMQ_PASS = process.env.RABBITMQ_PASSWORD || 'password';
 const COMMAND_QUEUE = 'workflow_response_queue';
 const DEFAULT_NODE = process.env.ODL_DEFAULT_NODE || 'openflow:1';
+const DEFAULT_POLICY_MODE = process.env.ODL_QUARANTINE_POLICY_MODE || 'strict_bi_directional';
+const DEFAULT_CONTAIN_ARP = process.env.ODL_CONTAIN_ARP !== 'false';
+const DEFAULT_CONTAIN_DHCP = process.env.ODL_CONTAIN_DHCP !== 'false';
+const DEFAULT_AUTO_EXPIRE = process.env.ODL_AUTO_EXPIRE_DEFAULT === 'true';
+const DEFAULT_DURATION_SECONDS = Number(process.env.ODL_DEFAULT_DURATION_SECONDS || 900);
+const MAX_DURATION_SECONDS = Number(process.env.ODL_MAX_DURATION_SECONDS || 86400);
 
 const LOCALIZATION_STATUS = {
     RESOLVED: 'resolved',
@@ -26,6 +32,8 @@ class OdlService {
         this.connection = null;
         this.channel = null;
         this.connecting = false;
+        this.activeMitigations = new Map();
+        this.expiryTimers = new Map();
         this.connectRabbitMQ();
     }
 
@@ -156,6 +164,262 @@ class OdlService {
         return { ip: normalizedIp, mac: normalizedMac };
     }
 
+    normalizePolicyOptions(policy = {}) {
+        const modeRaw = policy.mode && String(policy.mode).trim() ? String(policy.mode).trim() : DEFAULT_POLICY_MODE;
+        const mode = modeRaw.toLowerCase();
+        const containArp = typeof policy.contain_arp === 'boolean' ? policy.contain_arp : DEFAULT_CONTAIN_ARP;
+        const containDhcp = typeof policy.contain_dhcp === 'boolean' ? policy.contain_dhcp : DEFAULT_CONTAIN_DHCP;
+        return {
+            mode,
+            contain_arp: containArp,
+            contain_dhcp: containDhcp,
+            directions: ['src', 'dst']
+        };
+    }
+
+    normalizeLifecycleOptions(lifecycle = {}) {
+        const autoExpire = typeof lifecycle.auto_expire === 'boolean' ? lifecycle.auto_expire : DEFAULT_AUTO_EXPIRE;
+        const rawDuration = Number(lifecycle.duration_seconds);
+        const durationSeconds = Number.isFinite(rawDuration)
+            ? Math.min(Math.max(Math.floor(rawDuration), 0), MAX_DURATION_SECONDS)
+            : DEFAULT_DURATION_SECONDS;
+        const rollbackNote = lifecycle.rollback_note && String(lifecycle.rollback_note).trim()
+            ? String(lifecycle.rollback_note).trim()
+            : null;
+        const autoRestoreTrigger = lifecycle.auto_restore_trigger && String(lifecycle.auto_restore_trigger).trim()
+            ? String(lifecycle.auto_restore_trigger).trim()
+            : null;
+
+        return {
+            auto_expire: autoExpire,
+            duration_seconds: durationSeconds,
+            rollback_note: rollbackNote,
+            auto_restore_trigger: autoRestoreTrigger
+        };
+    }
+
+    createMitigationId() {
+        return `mit-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    }
+
+    scheduleMitigationExpiry(mitigationId) {
+        const mitigation = this.activeMitigations.get(mitigationId);
+        if (!mitigation || !mitigation.expires_at) {
+            return;
+        }
+
+        const expiresAtMillis = Date.parse(mitigation.expires_at);
+        if (!Number.isFinite(expiresAtMillis)) {
+            return;
+        }
+
+        const delay = Math.max(expiresAtMillis - Date.now(), 0);
+        this.clearMitigationTimer(mitigationId);
+
+        const timer = setTimeout(async () => {
+            try {
+                await this.clearMitigationById(mitigationId, {
+                    reason: 'auto-expire',
+                    rollback_note: mitigation.lifecycle?.rollback_note || 'Auto-expire quarantine rollback'
+                });
+            } catch (error) {
+                console.error(`❌ Auto-expire rollback failed for ${mitigationId}:`, error.message);
+            }
+        }, delay);
+
+        this.expiryTimers.set(mitigationId, timer);
+    }
+
+    clearMitigationTimer(mitigationId) {
+        const existing = this.expiryTimers.get(mitigationId);
+        if (existing) {
+            clearTimeout(existing);
+            this.expiryTimers.delete(mitigationId);
+        }
+    }
+
+    getMitigationStatus(record) {
+        if (record.status !== 'active') {
+            return record.status;
+        }
+        if (!record.expires_at) {
+            return 'active';
+        }
+        return Date.now() >= Date.parse(record.expires_at) ? 'expired_pending_rollback' : 'active';
+    }
+
+    serializeMitigation(record) {
+        const expiresAtMillis = record.expires_at ? Date.parse(record.expires_at) : null;
+        const remainingSeconds = expiresAtMillis
+            ? Math.max(Math.ceil((expiresAtMillis - Date.now()) / 1000), 0)
+            : null;
+        return {
+            ...record,
+            status: this.getMitigationStatus(record),
+            remaining_seconds: remainingSeconds
+        };
+    }
+
+    listActiveMitigations() {
+        const entries = Array.from(this.activeMitigations.values())
+            .filter((entry) => this.getMitigationStatus(entry) === 'active')
+            .map((entry) => this.serializeMitigation(entry))
+            .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+        return entries;
+    }
+
+    registerMitigation({ mitigationId, normalized, policy, lifecycle, localization }) {
+        const recordMitigationId = mitigationId || this.createMitigationId();
+        const createdAt = new Date().toISOString();
+        const expiresAt = lifecycle.auto_expire
+            ? new Date(Date.now() + lifecycle.duration_seconds * 1000).toISOString()
+            : null;
+
+        const record = {
+            mitigation_id: recordMitigationId,
+            status: 'active',
+            target: normalized,
+            policy,
+            lifecycle,
+            localization,
+            created_at: createdAt,
+            expires_at: expiresAt,
+            rollback: {
+                system_owned_only: true,
+                last_reason: null,
+                last_note: null,
+                completed_at: null
+            }
+        };
+
+        this.activeMitigations.set(recordMitigationId, record);
+        if (expiresAt) {
+            this.scheduleMitigationExpiry(recordMitigationId);
+        }
+
+        return this.serializeMitigation(record);
+    }
+
+    findActiveMitigationByTarget(ip, mac) {
+        const normalized = this.normalizeTarget(ip, mac);
+        const active = Array.from(this.activeMitigations.values())
+            .filter((entry) => entry.status === 'active')
+            .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+        return active.find((entry) => {
+            if (normalized.ip && entry.target.ip === normalized.ip) {
+                return true;
+            }
+            if (normalized.mac && entry.target.mac === normalized.mac) {
+                return true;
+            }
+            return false;
+        }) || null;
+    }
+
+    async clearMitigationById(mitigationId, options = {}) {
+        const mitigation = this.activeMitigations.get(mitigationId);
+        if (!mitigation) {
+            throw new Error(`Mitigation ${mitigationId} not found`);
+        }
+        if (mitigation.status !== 'active') {
+            return {
+                success: true,
+                mitigation: this.serializeMitigation(mitigation),
+                message: `Mitigation ${mitigationId} already ${mitigation.status}`
+            };
+        }
+
+        const reason = options.reason || 'manual-clear';
+        const rollbackNote = options.rollback_note || mitigation.lifecycle?.rollback_note || null;
+
+        const rollbackPayload = {
+            mitigation_id: mitigationId,
+            rollback_reason: reason,
+            rollback_note: rollbackNote,
+            rollback_scope: 'system_owned_only',
+            rollback_request_source: 'webapp.network_control',
+            quarantine_policy: mitigation.policy,
+            lifecycle: {
+                auto_expire: false,
+                duration_seconds: 0,
+                rollback_note: rollbackNote,
+                auto_restore_trigger: mitigation.lifecycle?.auto_restore_trigger || null
+            }
+        };
+
+        const publishResult = await this.publishManualWorkflowCommand(
+            'REMOVE_MITIGATION',
+            mitigation.target.ip,
+            mitigation.target.mac,
+            'REMOVE_ISOLATION',
+            rollbackNote || 'Rollback mitigation via Network page',
+            rollbackPayload
+        );
+
+        mitigation.status = reason === 'auto-expire' ? 'expired' : 'cleared';
+        mitigation.rollback.last_reason = reason;
+        mitigation.rollback.last_note = rollbackNote;
+        mitigation.rollback.completed_at = new Date().toISOString();
+        this.clearMitigationTimer(mitigationId);
+        this.activeMitigations.delete(mitigationId);
+
+        return {
+            success: true,
+            publish: publishResult,
+            mitigation: this.serializeMitigation(mitigation)
+        };
+    }
+
+    async clearMitigation({ mitigationId, ip, mac, reason, rollbackNote } = {}) {
+        if (mitigationId) {
+            return this.clearMitigationById(mitigationId, {
+                reason: reason || 'manual-clear',
+                rollback_note: rollbackNote || null
+            });
+        }
+
+        const mitigation = this.findActiveMitigationByTarget(ip, mac);
+        if (!mitigation) {
+            throw new Error('No active mitigation found for provided target');
+        }
+
+        return this.clearMitigationById(mitigation.mitigation_id, {
+            reason: reason || 'manual-clear',
+            rollback_note: rollbackNote || null
+        });
+    }
+
+    extendMitigation(mitigationId, extendSeconds) {
+        const mitigation = this.activeMitigations.get(mitigationId);
+        if (!mitigation) {
+            throw new Error(`Mitigation ${mitigationId} not found`);
+        }
+        if (mitigation.status !== 'active') {
+            throw new Error(`Mitigation ${mitigationId} is not active`);
+        }
+        if (!mitigation.lifecycle?.auto_expire) {
+            throw new Error(`Mitigation ${mitigationId} is not auto-expiring`);
+        }
+
+        const parsedExtend = Number(extendSeconds);
+        if (!Number.isFinite(parsedExtend) || parsedExtend <= 0) {
+            throw new Error('extend_seconds must be a positive number');
+        }
+
+        const currentExpiry = mitigation.expires_at ? Date.parse(mitigation.expires_at) : Date.now();
+        const nextExpiry = new Date(currentExpiry + Math.floor(parsedExtend) * 1000).toISOString();
+        mitigation.expires_at = nextExpiry;
+        mitigation.lifecycle.duration_seconds = Math.min(
+            mitigation.lifecycle.duration_seconds + Math.floor(parsedExtend),
+            MAX_DURATION_SECONDS
+        );
+        this.activeMitigations.set(mitigationId, mitigation);
+        this.scheduleMitigationExpiry(mitigationId);
+
+        return this.serializeMitigation(mitigation);
+    }
+
     extractHostsFromTopology(topology) {
         const result = [];
         const topologies = topology?.['network-topology']?.topology || [];
@@ -267,7 +531,7 @@ class OdlService {
         };
     }
 
-    async publishManualWorkflowCommand(eventType, ip, mac, action, justification) {
+    async publishManualWorkflowCommand(eventType, ip, mac, action, justification, extraPayload = {}) {
         await this.waitForChannel();
         const topology = await this.getTopology();
         const localization = this.resolveEndpointLocalization(topology, ip, mac);
@@ -281,7 +545,8 @@ class OdlService {
             priority: 'high',
             sdn_controller: 'opendaylight',
             justification,
-            localization
+            localization,
+            ...extraPayload
         };
 
         const command = this.buildWorkflowMessage(eventType, payload);
@@ -298,25 +563,51 @@ class OdlService {
     }
 
     // Publish isolation command
-    async isolateHost(ip, mac) {
-        return this.publishManualWorkflowCommand(
+    async isolateHost(ip, mac, options = {}) {
+        const normalized = this.normalizeTarget(ip, mac);
+        const policy = this.normalizePolicyOptions(options.policy || {});
+        const lifecycle = this.normalizeLifecycleOptions(options.lifecycle || {});
+        const mitigationId = this.createMitigationId();
+
+        const publishResult = await this.publishManualWorkflowCommand(
             'INITIATE_MITIGATION',
-            ip,
-            mac,
+            normalized.ip,
+            normalized.mac,
             'ISOLATE_VLAN',
-            'Manual isolation via web Network page'
+            'Manual isolation via web Network page',
+            {
+                mitigation_id: mitigationId,
+                quarantine_policy: policy,
+                lifecycle,
+                rollback_scope: 'system_owned_only',
+                rollback_request_source: 'webapp.network_control',
+                auto_restore_trigger: lifecycle.auto_restore_trigger || null
+            }
         );
+
+        const mitigation = this.registerMitigation({
+            mitigationId,
+            normalized,
+            policy,
+            lifecycle,
+            localization: publishResult.localization
+        });
+
+        return {
+            ...publishResult,
+            mitigation
+        };
     }
 
     // Publish remove isolation command
-    async removeIsolation(ip, mac) {
-        return this.publishManualWorkflowCommand(
-            'REMOVE_MITIGATION',
+    async removeIsolation(ip, mac, options = {}) {
+        return this.clearMitigation({
+            mitigationId: options.mitigation_id,
             ip,
             mac,
-            'REMOVE_ISOLATION',
-            'Manual remove isolation via web Network page'
-        );
+            reason: options.reason || 'manual-clear',
+            rollbackNote: options.rollback_note || 'Manual remove isolation via web Network page'
+        });
     }
 
     // Publish topology discovery (scan) command

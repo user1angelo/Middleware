@@ -200,8 +200,8 @@ app.get('/api/odl/topology', async (req, res) => {
 
 app.post('/api/odl/isolate', async (req, res) => {
   try {
-    const { ip, mac } = req.body;
-    const result = await odlService.isolateHost(ip, mac);
+    const { ip, mac, policy, lifecycle } = req.body;
+    const result = await odlService.isolateHost(ip, mac, { policy, lifecycle });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -210,9 +210,44 @@ app.post('/api/odl/isolate', async (req, res) => {
 
 app.post('/api/odl/remove-isolation', async (req, res) => {
   try {
-    const { ip, mac } = req.body;
-    const result = await odlService.removeIsolation(ip, mac);
+    const { ip, mac, mitigation_id, reason, rollback_note } = req.body;
+    const result = await odlService.removeIsolation(ip, mac, { mitigation_id, reason, rollback_note });
     res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/odl/mitigations/active', async (req, res) => {
+  try {
+    const active = odlService.listActiveMitigations();
+    res.json({ success: true, mitigations: active });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/odl/mitigations/:id/clear', async (req, res) => {
+  try {
+    const mitigationId = req.params.id;
+    const { reason, rollback_note } = req.body || {};
+    const result = await odlService.clearMitigation({
+      mitigationId,
+      reason: reason || 'manual-clear',
+      rollbackNote: rollback_note || null
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/odl/mitigations/:id/extend', async (req, res) => {
+  try {
+    const mitigationId = req.params.id;
+    const extendSeconds = req.body?.extend_seconds;
+    const mitigation = odlService.extendMitigation(mitigationId, extendSeconds);
+    res.json({ success: true, mitigation });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

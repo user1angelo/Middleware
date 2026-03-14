@@ -7,7 +7,9 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -19,6 +21,35 @@ import com.nis1.thesis.sdk.ModuleHelper;
  */
 public class OpenDaylightClient {
 
+    public static class QuarantinePolicyOptions {
+        public String mode = "strict_bi_directional";
+        public boolean containArp = true;
+        public boolean containDhcp = true;
+    }
+
+    private static class OwnedFlow {
+        private final String nodeId;
+        private final String flowId;
+
+        private OwnedFlow(String nodeId, String flowId) {
+            this.nodeId = nodeId;
+            this.flowId = flowId;
+        }
+    }
+
+    private static class MitigationRecord {
+        private final String mitigationId;
+        private final String targetIp;
+        private final String targetMac;
+        private final Set<OwnedFlow> installedFlows = new LinkedHashSet<>();
+
+        private MitigationRecord(String mitigationId, String targetIp, String targetMac) {
+            this.mitigationId = mitigationId;
+            this.targetIp = targetIp;
+            this.targetMac = targetMac;
+        }
+    }
+
     private final ModuleHelper helper;
     private final String moduleName;
     private final String baseUrl;
@@ -29,6 +60,10 @@ public class OpenDaylightClient {
     private static final String DEFAULT_NODE = "openflow:1";
     private static final int DEFAULT_TABLE = 0;
     private static final int ISOLATION_PRIORITY = 1000;
+    private static final String SYSTEM_FLOW_PREFIX = "sysq";
+
+    private final Map<String, MitigationRecord> ownedMitigations = new ConcurrentHashMap<>();
+    private final Map<String, String> targetIndex = new ConcurrentHashMap<>();
 
     public OpenDaylightClient(ModuleHelper helper, String moduleName, String baseUrl, String username,
             String password) {
@@ -39,53 +74,179 @@ public class OpenDaylightClient {
         this.password = password;
     }
 
-    /**
-     * Isolate a host by installing a high-priority DROP flow.
-     *
-     * @param targetIp The IP to block
-     * @return true if successful
-     */
-    public boolean isolateHost(String targetIp) {
-        String flowId = "isolate-" + targetIp;
-        String jsonPayload = buildIsolationFlowJson(flowId, targetIp);
-        Set<String> candidateNodes = resolveCandidateNodesForIp(targetIp);
-        boolean success = false;
+    public boolean isolateHost(String targetIp, String targetMac, String mitigationId, QuarantinePolicyOptions options) {
+        String normalizedIp = normalizeIp(targetIp);
+        String normalizedMac = normalizeMac(targetMac);
+        String normalizedMitigationId = mitigationId != null && !mitigationId.isBlank()
+                ? mitigationId.trim()
+                : "mit-" + System.currentTimeMillis();
 
+        QuarantinePolicyOptions effectiveOptions = options != null ? options : new QuarantinePolicyOptions();
+        Set<String> candidateNodes = resolveCandidateNodesForTarget(normalizedIp, normalizedMac);
+        MitigationRecord record = new MitigationRecord(normalizedMitigationId, normalizedIp, normalizedMac);
+
+        Set<String> flowTokens = buildFlowTokens(normalizedIp, normalizedMac, effectiveOptions);
+        if (flowTokens.isEmpty()) {
+            helper.log(moduleName, "ERROR", "Cannot isolate host: neither valid IP nor MAC selector is available");
+            return false;
+        }
+
+        int installedCount = 0;
         for (String nodeId : candidateNodes) {
-            String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
-                    baseUrl, nodeId, DEFAULT_TABLE, flowId);
-            int responseCode = sendRestRequest("PUT", url, jsonPayload);
-            if (responseCode >= 200 && responseCode < 300) {
-                success = true;
+            for (String token : flowTokens) {
+                String flowId = buildSystemFlowId(normalizedMitigationId, token);
+                String payload = buildIsolationFlowJson(flowId, normalizedIp, normalizedMac, token);
+                int responseCode = sendFlowRequest("PUT", nodeId, flowId, payload);
+                if (responseCode >= 200 && responseCode < 300) {
+                    installedCount++;
+                    record.installedFlows.add(new OwnedFlow(nodeId, flowId));
+                }
             }
         }
 
-        if (!success) {
-            helper.log(moduleName, "ERROR", "Failed to install isolation flow on all candidate nodes for " + targetIp);
+        if (record.installedFlows.isEmpty()) {
+            helper.log(moduleName, "ERROR", "Failed to install quarantine drop rules for mitigation " + normalizedMitigationId);
+            return false;
         }
 
-        return success;
+        ownedMitigations.put(normalizedMitigationId, record);
+        targetIndex.put(buildTargetKey(normalizedIp, normalizedMac), normalizedMitigationId);
+
+        helper.log(moduleName, "INFO", "Quarantine drop rules applied: " + installedCount
+                + " (mitigation_id=" + normalizedMitigationId + ", mode=" + effectiveOptions.mode
+                + ", arp=" + effectiveOptions.containArp + ", dhcp=" + effectiveOptions.containDhcp + ")");
+        return true;
     }
 
-    /**
-     * Remove isolation for a host.
-     */
-    public boolean removeIsolation(String targetIp) {
-        String flowId = "isolate-" + targetIp;
-        Set<String> candidateNodes = resolveCandidateNodesForIp(targetIp);
-        candidateNodes.addAll(fetchAllOpenFlowNodes());
+    public boolean removeIsolation(String targetIp, String targetMac, String mitigationId) {
+        String normalizedIp = normalizeIp(targetIp);
+        String normalizedMac = normalizeMac(targetMac);
+        String resolvedMitigationId = mitigationId != null && !mitigationId.isBlank()
+                ? mitigationId.trim()
+                : targetIndex.get(buildTargetKey(normalizedIp, normalizedMac));
 
-        boolean anyRemovedOrAlreadyAbsent = false;
-        for (String nodeId : candidateNodes) {
-            String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
-                    baseUrl, nodeId, DEFAULT_TABLE, flowId);
-            int responseCode = sendRestRequest("DELETE", url, null);
-            if ((responseCode >= 200 && responseCode < 300) || responseCode == 404) {
-                anyRemovedOrAlreadyAbsent = true;
+        if (resolvedMitigationId == null) {
+            helper.log(moduleName, "WARN", "No owned mitigation record found for target " + buildTargetKey(normalizedIp, normalizedMac));
+            return false;
+        }
+
+        MitigationRecord record = ownedMitigations.get(resolvedMitigationId);
+        if (record == null || record.installedFlows.isEmpty()) {
+            helper.log(moduleName, "WARN", "No owned flow records found for mitigation " + resolvedMitigationId);
+            ownedMitigations.remove(resolvedMitigationId);
+            return false;
+        }
+
+        boolean allRemovedOrAbsent = true;
+        for (OwnedFlow flow : record.installedFlows) {
+            int responseCode = sendFlowRequest("DELETE", flow.nodeId, flow.flowId, null);
+            if (!((responseCode >= 200 && responseCode < 300) || responseCode == 404)) {
+                allRemovedOrAbsent = false;
             }
         }
 
-        return anyRemovedOrAlreadyAbsent;
+        if (allRemovedOrAbsent) {
+            ownedMitigations.remove(resolvedMitigationId);
+            targetIndex.remove(buildTargetKey(record.targetIp, record.targetMac));
+            helper.log(moduleName, "INFO", "Removed system-owned quarantine rules for mitigation " + resolvedMitigationId);
+        } else {
+            helper.log(moduleName, "ERROR", "Failed to remove some system-owned quarantine rules for mitigation " + resolvedMitigationId);
+        }
+
+        return allRemovedOrAbsent;
+    }
+
+    private String normalizeIp(String ip) {
+        if (ip == null) {
+            return null;
+        }
+        String value = ip.trim();
+        return value.isEmpty() ? null : value;
+    }
+
+    private String normalizeMac(String mac) {
+        if (mac == null) {
+            return null;
+        }
+        String value = mac.trim().toLowerCase();
+        return value.isEmpty() ? null : value;
+    }
+
+    private String sanitize(String input) {
+        if (input == null) {
+            return "na";
+        }
+        return input.replaceAll("[^a-zA-Z0-9]", "_");
+    }
+
+    private String buildSystemFlowId(String mitigationId, String token) {
+        return SYSTEM_FLOW_PREFIX + "_" + sanitize(mitigationId) + "_" + sanitize(token);
+    }
+
+    private String buildTargetKey(String ip, String mac) {
+        String ipPart = ip != null ? ip : "no-ip";
+        String macPart = mac != null ? mac : "no-mac";
+        return ipPart + "|" + macPart;
+    }
+
+    private int sendFlowRequest(String method, String nodeId, String flowId, String jsonBody) {
+        String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
+                baseUrl, nodeId, DEFAULT_TABLE, flowId);
+        return sendRestRequest(method, url, jsonBody);
+    }
+
+    private Set<String> buildFlowTokens(String targetIp, String targetMac, QuarantinePolicyOptions options) {
+        Set<String> tokens = new LinkedHashSet<>();
+        boolean useIp = shouldUseIpSelector(options.mode, targetIp != null);
+        boolean useMac = shouldUseMacSelector(options.mode, targetMac != null);
+
+        if (useIp && targetIp != null) {
+            tokens.add("ipv4_src");
+            tokens.add("ipv4_dst");
+
+            if (options.containArp) {
+                tokens.add("arp_spa");
+                tokens.add("arp_tpa");
+            }
+
+            if (options.containDhcp) {
+                tokens.add("dhcp_src67dst68");
+                tokens.add("dhcp_src68dst67");
+            }
+        }
+
+        if (useMac && targetMac != null) {
+            tokens.add("eth_src");
+            tokens.add("eth_dst");
+
+            if (options.containArp) {
+                tokens.add("arp_eth_src");
+                tokens.add("arp_eth_dst");
+            }
+
+            if (options.containDhcp) {
+                tokens.add("dhcp_eth_src");
+                tokens.add("dhcp_eth_dst");
+            }
+        }
+
+        return tokens;
+    }
+
+    private boolean shouldUseIpSelector(String mode, boolean hasIp) {
+        if (!hasIp) {
+            return false;
+        }
+        String normalized = mode != null ? mode.toLowerCase() : "strict_bi_directional";
+        return !"mac_only_bidirectional".equals(normalized);
+    }
+
+    private boolean shouldUseMacSelector(String mode, boolean hasMac) {
+        if (!hasMac) {
+            return false;
+        }
+        String normalized = mode != null ? mode.toLowerCase() : "strict_bi_directional";
+        return !"ip_only_bidirectional".equals(normalized);
     }
 
     private int sendRestRequest(String method, String urlStr, String jsonBody) {
@@ -138,7 +299,7 @@ public class OpenDaylightClient {
         }
     }
 
-    private Set<String> resolveCandidateNodesForIp(String targetIp) {
+    private Set<String> resolveCandidateNodesForTarget(String targetIp, String targetMac) {
         Set<String> nodes = new LinkedHashSet<>();
 
         try {
@@ -171,7 +332,10 @@ public class OpenDaylightClient {
                             }
 
                             JSONArray addresses = node.optJSONArray("host-tracker-service:addresses");
-                            if (!hostMatchesIp(addresses, targetIp)) {
+                            String hostMac = nodeId.replace("host:", "").toLowerCase();
+                            boolean ipMatch = hostMatchesIp(addresses, targetIp);
+                            boolean macMatch = hostMatchesMac(hostMac, targetMac);
+                            if (!ipMatch && !macMatch) {
                                 continue;
                             }
 
@@ -196,7 +360,7 @@ public class OpenDaylightClient {
             nodes.add(DEFAULT_NODE);
         }
 
-        helper.log(moduleName, "DEBUG", "Candidate ODL nodes for " + targetIp + ": " + nodes);
+        helper.log(moduleName, "DEBUG", "Candidate ODL nodes for target " + buildTargetKey(targetIp, targetMac) + ": " + nodes);
         return nodes;
     }
 
@@ -293,6 +457,13 @@ public class OpenDaylightClient {
         return false;
     }
 
+    private boolean hostMatchesMac(String hostMac, String targetMac) {
+        if (targetMac == null || targetMac.isBlank()) {
+            return false;
+        }
+        return targetMac.equalsIgnoreCase(hostMac);
+    }
+
     private String extractNodeFromAttachmentPoints(JSONArray attachmentPoints) {
         if (attachmentPoints == null) {
             return null;
@@ -320,40 +491,125 @@ public class OpenDaylightClient {
         return null;
     }
 
-    private String buildIsolationFlowJson(String flowId, String ipAddress) {
-        // Construct JSON manually to avoid extra dependencies if possible,
-        // or usage of org.json if available in classpath
-        return "{\n" +
-                "  \"flow\": [\n" +
-                "    {\n" +
-                "      \"id\": \"" + flowId + "\",\n" +
-                "      \"table_id\": " + DEFAULT_TABLE + ",\n" +
-                "      \"priority\": " + ISOLATION_PRIORITY + ",\n" +
-                "      \"match\": {\n" +
-                "        \"ipv4-source\": \"" + ipAddress + "/32\",\n" +
-                "        \"ethernet-match\": {\n" +
-                "          \"ethernet-type\": {\n" +
-                "            \"type\": 2048\n" +
-                "          }\n" +
-                "        }\n" +
-                "      },\n" +
-                "      \"instructions\": {\n" +
-                "        \"instruction\": [\n" +
-                "          {\n" +
-                "            \"order\": 0,\n" +
-                "            \"apply-actions\": {\n" +
-                "              \"action\": [\n" +
-                "                {\n" +
-                "                  \"order\": 0,\n" +
-                "                  \"drop-action\": {}\n" +
-                "                }\n" +
-                "              ]\n" +
-                "            }\n" +
-                "          }\n" +
-                "        ]\n" +
-                "      }\n" +
-                "    }\n" +
-                "  ]\n" +
-                "}";
+    private String buildIsolationFlowJson(String flowId, String ipAddress, String macAddress, String token) {
+        JSONObject flow = new JSONObject();
+        flow.put("id", flowId);
+        flow.put("table_id", DEFAULT_TABLE);
+        flow.put("priority", ISOLATION_PRIORITY);
+        flow.put("match", buildMatch(ipAddress, macAddress, token));
+        flow.put("instructions", buildDropInstruction());
+
+        JSONArray flows = new JSONArray();
+        flows.put(flow);
+
+        JSONObject payload = new JSONObject();
+        payload.put("flow", flows);
+        return payload.toString();
+    }
+
+    private JSONObject buildMatch(String ipAddress, String macAddress, String token) {
+        JSONObject match = new JSONObject();
+
+        switch (token) {
+            case "ipv4_src":
+                match.put("ipv4-source", ipAddress + "/32");
+                match.put("ethernet-match", ethernetType(2048));
+                break;
+            case "ipv4_dst":
+                match.put("ipv4-destination", ipAddress + "/32");
+                match.put("ethernet-match", ethernetType(2048));
+                break;
+            case "eth_src":
+                match.put("ethernet-match", ethernetWithAddress("ethernet-source", macAddress, 2048));
+                break;
+            case "eth_dst":
+                match.put("ethernet-match", ethernetWithAddress("ethernet-destination", macAddress, 2048));
+                break;
+            case "arp_spa":
+                match.put("arp-source-transport-address", ipAddress + "/32");
+                match.put("ethernet-match", ethernetType(2054));
+                break;
+            case "arp_tpa":
+                match.put("arp-target-transport-address", ipAddress + "/32");
+                match.put("ethernet-match", ethernetType(2054));
+                break;
+            case "arp_eth_src":
+                match.put("ethernet-match", ethernetWithAddress("ethernet-source", macAddress, 2054));
+                break;
+            case "arp_eth_dst":
+                match.put("ethernet-match", ethernetWithAddress("ethernet-destination", macAddress, 2054));
+                break;
+            case "dhcp_src67dst68":
+                match.put("ipv4-source", ipAddress + "/32");
+                match.put("ethernet-match", ethernetType(2048));
+                match.put("ip-match", new JSONObject().put("ip-protocol", 17));
+                match.put("udp-source-port", 67);
+                match.put("udp-destination-port", 68);
+                break;
+            case "dhcp_src68dst67":
+                match.put("ipv4-destination", ipAddress + "/32");
+                match.put("ethernet-match", ethernetType(2048));
+                match.put("ip-match", new JSONObject().put("ip-protocol", 17));
+                match.put("udp-source-port", 68);
+                match.put("udp-destination-port", 67);
+                break;
+            case "dhcp_eth_src":
+                match.put("ethernet-match", ethernetWithAddress("ethernet-source", macAddress, 2048));
+                match.put("ip-match", new JSONObject().put("ip-protocol", 17));
+                match.put("udp-source-port", 67);
+                match.put("udp-destination-port", 68);
+                break;
+            case "dhcp_eth_dst":
+                match.put("ethernet-match", ethernetWithAddress("ethernet-destination", macAddress, 2048));
+                match.put("ip-match", new JSONObject().put("ip-protocol", 17));
+                match.put("udp-source-port", 68);
+                match.put("udp-destination-port", 67);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown quarantine token: " + token);
+        }
+
+        return match;
+    }
+
+    private JSONObject buildDropInstruction() {
+        JSONObject dropAction = new JSONObject();
+        dropAction.put("order", 0);
+        dropAction.put("drop-action", new JSONObject());
+
+        JSONArray actions = new JSONArray();
+        actions.put(dropAction);
+
+        JSONObject applyActions = new JSONObject();
+        applyActions.put("action", actions);
+
+        JSONObject instruction = new JSONObject();
+        instruction.put("order", 0);
+        instruction.put("apply-actions", applyActions);
+
+        JSONArray instructionArray = new JSONArray();
+        instructionArray.put(instruction);
+
+        JSONObject instructions = new JSONObject();
+        instructions.put("instruction", instructionArray);
+        return instructions;
+    }
+
+    private JSONObject ethernetType(int type) {
+        JSONObject ethernetType = new JSONObject();
+        ethernetType.put("type", type);
+
+        JSONObject ethernetMatch = new JSONObject();
+        ethernetMatch.put("ethernet-type", ethernetType);
+        return ethernetMatch;
+    }
+
+    private JSONObject ethernetWithAddress(String field, String macAddress, int type) {
+        JSONObject ethernetMatch = ethernetType(type);
+
+        JSONObject address = new JSONObject();
+        address.put("address", macAddress);
+        ethernetMatch.put(field, address);
+        return ethernetMatch;
     }
 }

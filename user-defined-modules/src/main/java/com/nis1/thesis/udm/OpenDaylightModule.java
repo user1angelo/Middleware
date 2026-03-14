@@ -42,6 +42,9 @@ public class OpenDaylightModule implements PluggableModule {
     private String odlBaseUrl = "http://localhost:8181";
     private String odlUsername = "admin";
     private String odlPassword = "admin";
+    private String defaultPolicyMode = "strict_bi_directional";
+    private boolean defaultContainArp = true;
+    private boolean defaultContainDhcp = true;
 
     private volatile boolean running = false;
 
@@ -99,6 +102,11 @@ public class OpenDaylightModule implements PluggableModule {
             MitigationCommandData command = (MitigationCommandData) data;
             String targetHost = command.getTargetHost();
             MitigationAction action = command.getAction();
+            JSONObject metadata = parseAdditionalParameters(command.getAdditionalParameters());
+            String targetMac = normalizeMac(metadata.optString("mac_address", null));
+            String mitigationId = normalizeBlank(metadata.optString("mitigation_id", null));
+            JSONObject policyJson = metadata.optJSONObject("quarantine_policy");
+            OpenDaylightClient.QuarantinePolicyOptions policyOptions = buildPolicyOptions(policyJson);
 
             helper.log(getName(), "INFO", "Received mitigation request: " + action + " for " + targetHost);
             helper.log(getName(), "DEBUG", "Full command data: " + command.toString()); // Assuming toString() is
@@ -109,9 +117,12 @@ public class OpenDaylightModule implements PluggableModule {
                     action == MitigationAction.QUARANTINE ||
                     action == MitigationAction.ISOLATE_VLAN) {
 
-                boolean success = odlClient.isolateHost(targetHost);
+                boolean success = odlClient.isolateHost(targetHost, targetMac, mitigationId, policyOptions);
                 if (success) {
-                    helper.log(getName(), "INFO", "Successfully isolated host: " + targetHost);
+                    helper.log(getName(), "INFO", "Successfully isolated host: " + targetHost
+                            + " [mode=" + policyOptions.mode
+                            + ", arp=" + policyOptions.containArp
+                            + ", dhcp=" + policyOptions.containDhcp + "]");
                 } else {
                     helper.log(getName(), "ERROR", "Failed to isolate host: " + targetHost);
                 }
@@ -139,10 +150,17 @@ public class OpenDaylightModule implements PluggableModule {
 
             MitigationCommandData command = (MitigationCommandData) data;
             String targetHost = command.getTargetHost();
+            JSONObject metadata = parseAdditionalParameters(command.getAdditionalParameters());
+            String targetMac = normalizeMac(metadata.optString("mac_address", null));
+            String mitigationId = normalizeBlank(metadata.optString("mitigation_id", null));
+            String rollbackReason = normalizeBlank(metadata.optString("rollback_reason", null));
 
             helper.log(getName(), "INFO", "Received remove mitigation request for " + targetHost);
+            if (rollbackReason != null) {
+                helper.log(getName(), "INFO", "Rollback reason: " + rollbackReason);
+            }
 
-            boolean success = odlClient.removeIsolation(targetHost);
+            boolean success = odlClient.removeIsolation(targetHost, targetMac, mitigationId);
             if (success) {
                 helper.log(getName(), "INFO", "Successfully removed isolation from host: " + targetHost);
             } else {
@@ -208,7 +226,7 @@ public class OpenDaylightModule implements PluggableModule {
      */
     public boolean manualIsolateHost(String ipAddress) {
         helper.log(getName(), "INFO", "Manual isolation requested for: " + ipAddress);
-        boolean success = odlClient.isolateHost(ipAddress);
+        boolean success = odlClient.isolateHost(ipAddress, null, null, buildPolicyOptions(null));
         if (success) {
             helper.log(getName(), "INFO", "Manual isolation SUCCESS for: " + ipAddress);
         } else {
@@ -225,7 +243,7 @@ public class OpenDaylightModule implements PluggableModule {
      */
     public boolean manualRemoveIsolation(String ipAddress) {
         helper.log(getName(), "INFO", "Remove isolation requested for: " + ipAddress);
-        boolean success = odlClient.removeIsolation(ipAddress);
+        boolean success = odlClient.removeIsolation(ipAddress, null, null);
         if (success) {
             helper.log(getName(), "INFO", "Isolation removed for: " + ipAddress);
         } else {
@@ -406,8 +424,58 @@ public class OpenDaylightModule implements PluggableModule {
             odlPassword = props.getProperty("odl.password", odlPassword);
             moduleId = props.getProperty("module.id", moduleId);
             moduleName = props.getProperty("module.name", moduleName);
+            defaultPolicyMode = props.getProperty("mitigation.policy.mode", defaultPolicyMode);
+            defaultContainArp = Boolean.parseBoolean(props.getProperty("mitigation.containment.arp", String.valueOf(defaultContainArp)));
+            defaultContainDhcp = Boolean.parseBoolean(props.getProperty("mitigation.containment.dhcp", String.valueOf(defaultContainDhcp)));
         } catch (IOException e) {
             System.out.println("[OpenDaylightModule] Using default config");
         }
+    }
+
+    private JSONObject parseAdditionalParameters(String additionalParameters) {
+        if (additionalParameters == null || additionalParameters.isBlank()) {
+            return new JSONObject();
+        }
+        try {
+            return new JSONObject(additionalParameters);
+        } catch (Exception ex) {
+            helper.log(getName(), "WARN", "Failed to parse mitigation additional parameters: " + ex.getMessage());
+            return new JSONObject();
+        }
+    }
+
+    private OpenDaylightClient.QuarantinePolicyOptions buildPolicyOptions(JSONObject policyJson) {
+        OpenDaylightClient.QuarantinePolicyOptions options = new OpenDaylightClient.QuarantinePolicyOptions();
+        options.mode = defaultPolicyMode;
+        options.containArp = defaultContainArp;
+        options.containDhcp = defaultContainDhcp;
+
+        if (policyJson != null) {
+            String requestedMode = normalizeBlank(policyJson.optString("mode", null));
+            if (requestedMode != null) {
+                options.mode = requestedMode;
+            }
+            if (policyJson.has("contain_arp")) {
+                options.containArp = policyJson.optBoolean("contain_arp", options.containArp);
+            }
+            if (policyJson.has("contain_dhcp")) {
+                options.containDhcp = policyJson.optBoolean("contain_dhcp", options.containDhcp);
+            }
+        }
+
+        return options;
+    }
+
+    private String normalizeMac(String mac) {
+        String value = normalizeBlank(mac);
+        return value == null ? null : value.toLowerCase();
+    }
+
+    private String normalizeBlank(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }
