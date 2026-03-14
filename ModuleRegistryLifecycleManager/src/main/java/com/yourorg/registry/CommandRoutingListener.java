@@ -53,9 +53,11 @@ public class CommandRoutingListener implements Runnable {
              Channel channel = connection.createChannel()) {
             
             String workflowResponseQueue = ConfigLoader.getWorkflowResponseQueueName();
+            String mitigationEventsQueue = ConfigLoader.getMitigationEventsQueueName();
             
             // Declare queue
             channel.queueDeclare(workflowResponseQueue, true, false, false, null);
+            channel.queueDeclare(mitigationEventsQueue, true, false, false, null);
             
             System.out.println("🎯 CommandRoutingListener started");
             System.out.println("   Listening on: " + workflowResponseQueue);
@@ -65,7 +67,7 @@ public class CommandRoutingListener implements Runnable {
             DeliverCallback deliverCallback = (consumerTag, delivery) -> {
                 try {
                     String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-                    routeCommand(message, channel);
+                    routeCommand(message, channel, mitigationEventsQueue);
                     
                     // Acknowledge message
                     channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
@@ -95,7 +97,7 @@ public class CommandRoutingListener implements Runnable {
     /**
      * Route command to appropriate UDM
      */
-    private void routeCommand(String message, Channel channel) throws IOException {
+    private void routeCommand(String message, Channel channel, String mitigationEventsQueue) throws IOException {
         try {
             JSONObject json = new JSONObject(message);
             String messageType = json.optString("message_type", "unknown");
@@ -168,6 +170,16 @@ public class CommandRoutingListener implements Runnable {
                 channel.basicPublish("", commandQueue, null, messageBytes);
                 System.out.println("✅ Routed command '" + command + "' to module '" + 
                                  module.getModuleId() + "' via queue '" + commandQueue + "'");
+            }
+
+            // Mirror mitigation lifecycle commands to a dedicated queue for web dashboard state sync.
+            if ("INITIATE_MITIGATION".equals(command) || "REMOVE_MITIGATION".equals(command)) {
+                try {
+                    byte[] messageBytes = json.toString().getBytes(StandardCharsets.UTF_8);
+                    channel.basicPublish("", mitigationEventsQueue, null, messageBytes);
+                } catch (Exception mirrorEx) {
+                    System.err.println("⚠️ Mitigation mirror publish failed (non-blocking): " + mirrorEx.getMessage());
+                }
             }
             
         } catch (Exception e) {

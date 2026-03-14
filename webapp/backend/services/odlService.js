@@ -13,6 +13,7 @@ const RABBITMQ_PORT = process.env.RABBITMQ_PORT || 5672;
 const RABBITMQ_USER = process.env.RABBITMQ_USER || 'user';
 const RABBITMQ_PASS = process.env.RABBITMQ_PASSWORD || 'password';
 const COMMAND_QUEUE = 'workflow_response_queue';
+const MITIGATION_EVENTS_QUEUE = process.env.MITIGATION_EVENTS_QUEUE || 'webapp_mitigation_events_queue';
 const DEFAULT_NODE = process.env.ODL_DEFAULT_NODE || 'openflow:1';
 const DEFAULT_POLICY_MODE = process.env.ODL_QUARANTINE_POLICY_MODE || 'strict_bi_directional';
 const DEFAULT_CONTAIN_ARP = process.env.ODL_CONTAIN_ARP !== 'false';
@@ -31,6 +32,7 @@ class OdlService {
     constructor() {
         this.connection = null;
         this.channel = null;
+        this.listenerChannel = null;
         this.connecting = false;
         this.activeMitigations = new Map();
         this.expiryTimers = new Map();
@@ -51,12 +53,14 @@ class OdlService {
                 this.connection = await amqp.connect(url);
                 this.channel = await this.connection.createChannel();
                 await this.channel.assertQueue(COMMAND_QUEUE, { durable: true });
+                await this.startMitigationEventsListener();
                 console.log('✅ OdlService connected to RabbitMQ');
 
                 // Handle connection close/error events
                 this.connection.on('close', () => {
                     console.warn('⚠️ RabbitMQ connection closed, reconnecting...');
                     this.channel = null;
+                    this.listenerChannel = null;
                     this.connection = null;
                     this.connecting = false;
                     setTimeout(() => this.connectRabbitMQ(), retryDelay);
@@ -92,6 +96,109 @@ class OdlService {
                 this.connectRabbitMQ();
             }
             throw new Error('RabbitMQ channel not ready. Please ensure RabbitMQ is running and try again.');
+        }
+    }
+
+    async startMitigationEventsListener() {
+        if (!this.connection) {
+            return;
+        }
+
+        if (this.listenerChannel) {
+            return;
+        }
+
+        this.listenerChannel = await this.connection.createChannel();
+        await this.listenerChannel.assertQueue(MITIGATION_EVENTS_QUEUE, { durable: true });
+        await this.listenerChannel.prefetch(25);
+
+        await this.listenerChannel.consume(MITIGATION_EVENTS_QUEUE, async (msg) => {
+            if (!msg) {
+                return;
+            }
+
+            try {
+                const content = msg.content.toString('utf-8');
+                const parsed = JSON.parse(content);
+                this.applyMirroredMitigationEvent(parsed);
+                this.listenerChannel.ack(msg);
+            } catch (error) {
+                console.error('❌ Failed to process mirrored mitigation event:', error.message);
+                this.listenerChannel.nack(msg, false, false);
+            }
+        });
+
+        console.log(`📡 OdlService listening for mitigation events on '${MITIGATION_EVENTS_QUEUE}'`);
+    }
+
+    applyMirroredMitigationEvent(event) {
+        if (!event || typeof event !== 'object') {
+            return;
+        }
+
+        const eventType = event.event_type;
+        const payload = event.payload || {};
+
+        if (eventType === 'INITIATE_MITIGATION') {
+            this.registerMirroredMitigation(payload, event.event_id);
+            return;
+        }
+
+        if (eventType === 'REMOVE_MITIGATION') {
+            this.clearMirroredMitigation(payload);
+        }
+    }
+
+    registerMirroredMitigation(payload, fallbackEventId) {
+        const normalized = this.normalizeTarget(payload.ip_address || payload.targetHost, payload.mac_address);
+        if (!normalized.ip && !normalized.mac) {
+            return;
+        }
+
+        const policy = this.normalizePolicyOptions(payload.quarantine_policy || {});
+        const lifecycle = this.normalizeLifecycleOptions(payload.lifecycle || {});
+        const mitigationId = payload.mitigation_id || fallbackEventId || this.createMitigationId();
+        const localization = payload.localization || {
+            status: LOCALIZATION_STATUS.FALLBACK,
+            confidence: 'low',
+            node: DEFAULT_NODE,
+            port: null,
+            source_of_truth: 'mirrored_event',
+            fallback_reason: 'Localization data not included in mirrored event'
+        };
+
+        const existing = this.activeMitigations.get(mitigationId);
+        if (existing && existing.status === 'active') {
+            return;
+        }
+
+        this.registerMitigation({
+            mitigationId,
+            normalized,
+            policy,
+            lifecycle,
+            localization
+        });
+    }
+
+    clearMirroredMitigation(payload) {
+        const mitigationId = payload.mitigation_id;
+
+        if (mitigationId && this.activeMitigations.has(mitigationId)) {
+            this.clearMitigationTimer(mitigationId);
+            this.activeMitigations.delete(mitigationId);
+            return;
+        }
+
+        const normalized = this.normalizeTarget(payload.ip_address || payload.targetHost, payload.mac_address);
+        if (!normalized.ip && !normalized.mac) {
+            return;
+        }
+
+        const match = this.findActiveMitigationByTarget(normalized.ip, normalized.mac);
+        if (match) {
+            this.clearMitigationTimer(match.mitigation_id);
+            this.activeMitigations.delete(match.mitigation_id);
         }
     }
 

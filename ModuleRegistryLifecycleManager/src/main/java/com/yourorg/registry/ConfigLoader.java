@@ -55,6 +55,7 @@ public class ConfigLoader {
         properties.setProperty("rabbitmq.workflow_queue.name", "workflow_queue");
         properties.setProperty("rabbitmq.alerts_queue.name", "alerts_queue");
         properties.setProperty("rabbitmq.workflow_response_queue.name", "workflow_response_queue");
+        properties.setProperty("rabbitmq.mitigation_events_queue.name", "webapp_mitigation_events_queue");
         properties.setProperty("rabbitmq.legacy_workflow_ingress.enabled", "true");
 
         // Health monitoring
@@ -127,6 +128,10 @@ public class ConfigLoader {
 
     public static String getWorkflowResponseQueueName() {
         return properties.getProperty("rabbitmq.workflow_response_queue.name", "workflow_response_queue");
+    }
+
+    public static String getMitigationEventsQueueName() {
+        return properties.getProperty("rabbitmq.mitigation_events_queue.name", "webapp_mitigation_events_queue");
     }
 
     // Health monitoring configuration
