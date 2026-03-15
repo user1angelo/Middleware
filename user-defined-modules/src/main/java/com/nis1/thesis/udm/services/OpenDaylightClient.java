@@ -63,6 +63,8 @@ public class OpenDaylightClient {
     private static final int DEFAULT_TABLE = 0;
     private static final int ISOLATION_PRIORITY = 1000;
     private static final String SYSTEM_FLOW_PREFIX = "sysq";
+    private static final int FLOW_REQUEST_MAX_RETRIES = 3;
+    private static final long FLOW_REQUEST_BACKOFF_BASE_MS = 300L;
     private static final Pattern IPV4_PATTERN = Pattern.compile("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b");
 
     private final Map<String, MitigationRecord> ownedMitigations = new ConcurrentHashMap<>();
@@ -123,7 +125,7 @@ public class OpenDaylightClient {
             for (String token : flowTokens) {
                 String flowId = buildSystemFlowId(normalizedMitigationId, token);
                 String payload = buildIsolationFlowJson(flowId, normalizedIp, normalizedMac, token);
-                int responseCode = sendFlowRequest("PUT", nodeId, flowId, payload);
+                int responseCode = sendFlowRequestWithRetry("PUT", nodeId, flowId, payload);
                 if (responseCode >= 200 && responseCode < 300) {
                     installedCount++;
                     record.installedFlows.add(new OwnedFlow(nodeId, flowId));
@@ -148,12 +150,25 @@ public class OpenDaylightClient {
     public boolean removeIsolation(String targetIp, String targetMac, String mitigationId) {
         String normalizedIp = normalizeIp(targetIp);
         String normalizedMac = normalizeMac(targetMac);
+        String targetKey = buildTargetKey(normalizedIp, normalizedMac);
         String resolvedMitigationId = mitigationId != null && !mitigationId.isBlank()
                 ? mitigationId.trim()
-                : targetIndex.get(buildTargetKey(normalizedIp, normalizedMac));
+                : targetIndex.get(targetKey);
+
+        // Auto-isolation workflows may emit a non-persistent external identifier.
+        // If provided mitigation ID is unknown, prefer the target-indexed active mitigation.
+        if (resolvedMitigationId != null && !ownedMitigations.containsKey(resolvedMitigationId)) {
+            String indexedMitigationId = targetIndex.get(targetKey);
+            if (indexedMitigationId != null && !indexedMitigationId.equals(resolvedMitigationId)) {
+                helper.log(moduleName, "WARN", "Mitigation ID mismatch for target " + targetKey
+                        + " (provided=" + resolvedMitigationId + ", indexed=" + indexedMitigationId
+                        + "); using indexed mitigation for cleanup");
+                resolvedMitigationId = indexedMitigationId;
+            }
+        }
 
         if (resolvedMitigationId == null) {
-            helper.log(moduleName, "WARN", "No owned mitigation record found for target " + buildTargetKey(normalizedIp, normalizedMac));
+            helper.log(moduleName, "WARN", "No owned mitigation record found for target " + targetKey);
             return false;
         }
 
@@ -171,7 +186,7 @@ public class OpenDaylightClient {
 
         boolean allRemovedOrAbsent = true;
         for (OwnedFlow flow : record.installedFlows) {
-            int responseCode = sendFlowRequest("DELETE", flow.nodeId, flow.flowId, null);
+            int responseCode = sendFlowRequestWithRetry("DELETE", flow.nodeId, flow.flowId, null);
             if (!((responseCode >= 200 && responseCode < 300) || responseCode == 404)) {
                 allRemovedOrAbsent = false;
             }
@@ -215,7 +230,7 @@ public class OpenDaylightClient {
                 }
 
                 matchedFlows++;
-                int responseCode = sendFlowRequest("DELETE", nodeId, flowId, null);
+                int responseCode = sendFlowRequestWithRetry("DELETE", nodeId, flowId, null);
                 if (!((responseCode >= 200 && responseCode < 300) || responseCode == 404)) {
                     deletionFailures++;
                 }
@@ -360,6 +375,39 @@ public class OpenDaylightClient {
         String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
                 baseUrl, nodeId, DEFAULT_TABLE, flowId);
         return sendRestRequest(method, url, jsonBody);
+    }
+
+    private int sendFlowRequestWithRetry(String method, String nodeId, String flowId, String jsonBody) {
+        int attempt = 0;
+        int lastResponse = -1;
+
+        while (attempt < FLOW_REQUEST_MAX_RETRIES) {
+            attempt++;
+            lastResponse = sendFlowRequest(method, nodeId, flowId, jsonBody);
+
+            boolean successOrAbsent = (lastResponse >= 200 && lastResponse < 300)
+                    || ("DELETE".equals(method) && lastResponse == 404);
+            if (successOrAbsent) {
+                return lastResponse;
+            }
+
+            if (attempt >= FLOW_REQUEST_MAX_RETRIES) {
+                break;
+            }
+
+            long delayMs = FLOW_REQUEST_BACKOFF_BASE_MS * (1L << (attempt - 1));
+            helper.log(moduleName, "WARN", "Flow request retry " + attempt + "/" + FLOW_REQUEST_MAX_RETRIES
+                    + " for " + method + " flow " + flowId + " on " + nodeId
+                    + " (response=" + lastResponse + ", next_delay_ms=" + delayMs + ")");
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        return lastResponse;
     }
 
     private Set<String> buildFlowTokens(String targetIp, String targetMac, QuarantinePolicyOptions options) {

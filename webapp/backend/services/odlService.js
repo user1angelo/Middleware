@@ -495,7 +495,36 @@ class OdlService {
 
         const mitigation = this.findActiveMitigationByTarget(ip, mac);
         if (!mitigation) {
-            throw new Error('No active mitigation found for provided target');
+            // Fallback path: local cache may be stale/missing for auto-isolated hosts.
+            // Publish explicit rollback command by target so ODL module can resolve via its own indexes.
+            const normalized = this.normalizeTarget(ip, mac);
+            if (!normalized.ip && !normalized.mac) {
+                throw new Error('No active mitigation found and no valid target provided');
+            }
+
+            const publish = await this.publishManualWorkflowCommand(
+                'REMOVE_MITIGATION',
+                normalized.ip,
+                normalized.mac,
+                'REMOVE_ISOLATION',
+                'Rollback mitigation via Network page (target fallback)',
+                {
+                    rollback_reason: reason || 'manual-clear',
+                    rollback_scope: 'system_owned_only',
+                    rollback_request_source: 'webapp.network_control',
+                    lifecycle: {
+                        auto_expire: false,
+                        duration_seconds: 0
+                    }
+                }
+            );
+
+            return {
+                success: true,
+                publish,
+                mitigation: null,
+                message: 'Rollback command queued using target fallback (no local mitigation cache entry)'
+            };
         }
 
         return this.clearMitigationById(mitigation.mitigation_id, {

@@ -1,11 +1,32 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const Logs = ({ activeTab, setActiveTab, connected, logs, setLogs }) => {
   const logEndRef = useRef(null);
+  const logContainerRef = useRef(null);
+  const [followLogs, setFollowLogs] = useState(true);
+
+  const isNearBottom = () => {
+    const el = logContainerRef.current;
+    if (!el) return true;
+    const thresholdPx = 80;
+    return (el.scrollHeight - el.scrollTop - el.clientHeight) <= thresholdPx;
+  };
   
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (followLogs && isNearBottom()) {
+      logEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
   }, [logs, activeTab]);
+
+  const handleScroll = () => {
+    if (!followLogs) {
+      return;
+    }
+
+    if (!isNearBottom()) {
+      setFollowLogs(false);
+    }
+  };
   
   const tabs = [
     { key: 'threatContextStore', label: 'ThreatContextStore' },
@@ -40,7 +61,11 @@ const Logs = ({ activeTab, setActiveTab, connected, logs, setLogs }) => {
           ))}
         </div>
         
-        <div className="log-viewer">
+        <div
+          className="log-viewer"
+          ref={logContainerRef}
+          onScroll={handleScroll}
+        >
           {(logs[activeTab] || []).map((log, i) => (
             <div key={i} className="log-line">
               <span style={{color: 'var(--text-muted)'}}>{new Date(log.timestamp).toLocaleTimeString()}</span>
@@ -55,6 +80,13 @@ const Logs = ({ activeTab, setActiveTab, connected, logs, setLogs }) => {
         </div>
         
         <div style={{marginTop: '16px'}}>
+          <button
+            className="button button-small"
+            onClick={() => setFollowLogs((prev) => !prev)}
+            style={{ marginRight: '8px' }}
+          >
+            {followLogs ? 'Pause Auto-Follow' : 'Resume Auto-Follow'}
+          </button>
           <button
             className="button button-small"
             onClick={() => setLogs(prev => ({ ...prev, [activeTab]: [] }))}
