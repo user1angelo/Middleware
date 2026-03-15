@@ -1,15 +1,50 @@
 import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 
+const LOGS_STORAGE_KEY = 'webapp.logs.pageState.v1';
+
+const DEFAULT_LOGS = {
+  threatContextStore: [],
+  moduleRegistry: [],
+  workflowEngine: [],
+  rabbitmq: []
+};
+
+const loadStoredLogsPageState = () => {
+  try {
+    const raw = sessionStorage.getItem(LOGS_STORAGE_KEY);
+    if (!raw) {
+      return {
+        activeTab: 'threatContextStore',
+        logs: DEFAULT_LOGS
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+    const storedLogs = parsed?.logs && typeof parsed.logs === 'object' ? parsed.logs : {};
+
+    return {
+      activeTab: typeof parsed?.activeTab === 'string' ? parsed.activeTab : 'threatContextStore',
+      logs: {
+        threatContextStore: Array.isArray(storedLogs.threatContextStore) ? storedLogs.threatContextStore : [],
+        moduleRegistry: Array.isArray(storedLogs.moduleRegistry) ? storedLogs.moduleRegistry : [],
+        workflowEngine: Array.isArray(storedLogs.workflowEngine) ? storedLogs.workflowEngine : [],
+        rabbitmq: Array.isArray(storedLogs.rabbitmq) ? storedLogs.rabbitmq : []
+      }
+    };
+  } catch (error) {
+    return {
+      activeTab: 'threatContextStore',
+      logs: DEFAULT_LOGS
+    };
+  }
+};
+
 const Logs = () => {
-  const [activeTab, setActiveTab] = useState('threatContextStore');
+  const initialState = loadStoredLogsPageState();
+  const [activeTab, setActiveTab] = useState(initialState.activeTab);
   const [connected, setConnected] = useState(false);
-  const [logs, setLogs] = useState({
-    threatContextStore: [],
-    moduleRegistry: [],
-    workflowEngine: [],
-    rabbitmq: []
-  });
+  const [logs, setLogs] = useState(initialState.logs);
   const logEndRef = useRef(null);
   const socket = useRef(null);
   
@@ -59,6 +94,10 @@ const Logs = () => {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs, activeTab]);
+
+  useEffect(() => {
+    sessionStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify({ activeTab, logs }));
+  }, [activeTab, logs]);
   
   const tabs = [
     { key: 'threatContextStore', label: 'ThreatContextStore' },
@@ -108,7 +147,10 @@ const Logs = () => {
         </div>
         
         <div style={{marginTop: '16px'}}>
-          <button className="button button-small" onClick={() => setLogs({...logs, [activeTab]: []})}>
+          <button
+            className="button button-small"
+            onClick={() => setLogs(prev => ({ ...prev, [activeTab]: [] }))}
+          >
             Clear Logs
           </button>
         </div>
