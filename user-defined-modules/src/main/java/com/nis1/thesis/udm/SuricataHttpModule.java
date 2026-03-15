@@ -58,12 +58,15 @@ public class SuricataHttpModule implements PluggableModule {
     private int minThreatScore = 75;
     private String severityThreshold = "high"; // "critical" or "high"
     private String[] highRiskCategories = { "ransomware", "apt_activity", "c2_communication", "malware" };
+    private long isolationCooldownMs = 120000;
+    private int isolationCooldownCacheMaxSize = 5000;
 
     // Alert anti-spam / deduplication
     private boolean dedupEnabled = true;
     private long dedupWindowMs = 30000;
     private int dedupCacheMaxSize = 5000;
     private final ConcurrentHashMap<String, Long> recentAlertTimestamps = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> recentIsolationTimestamps = new ConcurrentHashMap<>();
 
     private volatile boolean running = false;
     private final Gson gson = new Gson();
@@ -145,6 +148,9 @@ public class SuricataHttpModule implements PluggableModule {
             String categoriesStr = props.getProperty("suricata.auto_isolate.categories",
                     "ransomware,apt_activity,c2_communication,malware");
             highRiskCategories = categoriesStr.split(",");
+                isolationCooldownMs = Long.parseLong(props.getProperty("suricata.auto_isolate.cooldown_ms", "120000"));
+                isolationCooldownCacheMaxSize = Integer.parseInt(
+                    props.getProperty("suricata.auto_isolate.cooldown.max_entries", "5000"));
 
             dedupEnabled = Boolean.parseBoolean(props.getProperty("suricata.alert_dedup.enabled", "true"));
             dedupWindowMs = Long.parseLong(props.getProperty("suricata.alert_dedup.window_ms", "30000"));
@@ -152,6 +158,8 @@ public class SuricataHttpModule implements PluggableModule {
 
             System.out.println("[SuricataHttpModule] Loaded config from " + CONFIG_PATH);
             System.out.println("[SuricataHttpModule] Auto-isolation enabled: " + autoIsolateEnabled);
+                System.out.println("[SuricataHttpModule] Isolation cooldown enabled: " + (isolationCooldownMs > 0)
+                    + " (cooldown_ms=" + isolationCooldownMs + ", max_entries=" + isolationCooldownCacheMaxSize + ")");
             System.out.println("[SuricataHttpModule] Alert dedup enabled: " + dedupEnabled +
                     " (window_ms=" + dedupWindowMs + ", max_entries=" + dedupCacheMaxSize + ")");
         } catch (IOException e) {
@@ -373,6 +381,14 @@ public class SuricataHttpModule implements PluggableModule {
      */
     private void triggerAutomatedIsolation(SuricataAlertData alert) {
         String targetHost = alert.getSourceIp();
+
+        if (!shouldPublishIsolationForHost(targetHost)) {
+            helper.log(getName(), "INFO",
+                    String.format("Suppressed duplicate auto-isolation for %s inside cooldown window (%d ms)",
+                            targetHost, isolationCooldownMs));
+            return;
+        }
+
         String justification = String.format(
                 "Automated isolation: Suricata detected %s (severity=%s, score=%d, sig=%s)",
                 alert.getCategory(),
@@ -392,6 +408,33 @@ public class SuricataHttpModule implements PluggableModule {
 
         helper.log(getName(), "INFO",
                 String.format("Published mitigation command: ISOLATE_VLAN for %s", targetHost));
+    }
+
+    private boolean shouldPublishIsolationForHost(String targetHost) {
+        if (targetHost == null || targetHost.isBlank()) {
+            helper.log(getName(), "WARN", "Auto-isolation skipped because source host is missing");
+            return false;
+        }
+
+        if (isolationCooldownMs <= 0) {
+            return true;
+        }
+
+        long now = System.currentTimeMillis();
+        cleanupExpiredIsolationEntries(now);
+
+        String key = targetHost.trim();
+        Long previousTimestamp = recentIsolationTimestamps.putIfAbsent(key, now);
+        if (previousTimestamp == null) {
+            return true;
+        }
+
+        if ((now - previousTimestamp) <= isolationCooldownMs) {
+            return false;
+        }
+
+        recentIsolationTimestamps.put(key, now);
+        return true;
     }
 
     // ---------------------------------------------------------------------
@@ -515,6 +558,21 @@ public class SuricataHttpModule implements PluggableModule {
 
         if (recentAlertTimestamps.size() > dedupCacheMaxSize) {
             recentAlertTimestamps.clear();
+        }
+    }
+
+    private void cleanupExpiredIsolationEntries(long now) {
+        long cutoff = now - isolationCooldownMs;
+        Iterator<Map.Entry<String, Long>> iterator = recentIsolationTimestamps.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, Long> entry = iterator.next();
+            if (entry.getValue() < cutoff) {
+                iterator.remove();
+            }
+        }
+
+        if (recentIsolationTimestamps.size() > isolationCooldownCacheMaxSize) {
+            recentIsolationTimestamps.clear();
         }
     }
 

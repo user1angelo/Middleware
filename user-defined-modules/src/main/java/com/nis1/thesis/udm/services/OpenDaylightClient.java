@@ -91,9 +91,18 @@ public class OpenDaylightClient {
 
         String activeMitigationForTarget = targetIndex.get(targetKey);
         if (activeMitigationForTarget != null && !activeMitigationForTarget.equals(normalizedMitigationId)) {
-            helper.log(moduleName, "INFO", "Replacing existing mitigation " + activeMitigationForTarget
-                + " with " + normalizedMitigationId + " for target " + targetKey);
-            removeIsolation(normalizedIp, normalizedMac, activeMitigationForTarget);
+            MitigationRecord activeRecord = ownedMitigations.get(activeMitigationForTarget);
+            if (activeRecord != null && !activeRecord.installedFlows.isEmpty()) {
+                helper.log(moduleName, "INFO", "Mitigation already active for target " + targetKey
+                    + " (active=" + activeMitigationForTarget + ", incoming=" + normalizedMitigationId
+                    + "); duplicate isolate request ignored");
+                return true;
+            }
+
+            helper.log(moduleName, "WARN", "Target index was stale for " + targetKey
+                + " (mitigation=" + activeMitigationForTarget + "); continuing with fresh mitigation "
+                + normalizedMitigationId);
+            targetIndex.remove(targetKey, activeMitigationForTarget);
         }
 
         QuarantinePolicyOptions effectiveOptions = options != null ? options : new QuarantinePolicyOptions();
