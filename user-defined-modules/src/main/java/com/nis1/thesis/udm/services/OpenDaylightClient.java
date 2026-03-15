@@ -10,6 +10,8 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -61,6 +63,7 @@ public class OpenDaylightClient {
     private static final int DEFAULT_TABLE = 0;
     private static final int ISOLATION_PRIORITY = 1000;
     private static final String SYSTEM_FLOW_PREFIX = "sysq";
+    private static final Pattern IPV4_PATTERN = Pattern.compile("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b");
 
     private final Map<String, MitigationRecord> ownedMitigations = new ConcurrentHashMap<>();
     private final Map<String, String> targetIndex = new ConcurrentHashMap<>();
@@ -316,7 +319,16 @@ public class OpenDaylightClient {
             return null;
         }
         String value = ip.trim();
-        return value.isEmpty() ? null : value;
+        if (value.isEmpty() || value.contains("[MISSING:")) {
+            return null;
+        }
+
+        Matcher matcher = IPV4_PATTERN.matcher(value);
+        if (!matcher.find()) {
+            return null;
+        }
+
+        return matcher.group();
     }
 
     private String normalizeMac(String mac) {

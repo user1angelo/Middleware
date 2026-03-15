@@ -172,6 +172,12 @@ class OdlService {
             return;
         }
 
+        const existingByTarget = this.findActiveMitigationByTarget(normalized.ip, normalized.mac);
+        if (existingByTarget && existingByTarget.mitigation_id !== mitigationId) {
+            this.clearMitigationTimer(existingByTarget.mitigation_id);
+            this.activeMitigations.delete(existingByTarget.mitigation_id);
+        }
+
         this.registerMitigation({
             mitigationId,
             normalized,
@@ -266,9 +272,27 @@ class OdlService {
     }
 
     normalizeTarget(ip, mac) {
-        const normalizedIp = ip && String(ip).trim() ? String(ip).trim() : null;
+        const normalizedIp = this.extractIpv4(ip);
         const normalizedMac = mac && String(mac).trim() ? String(mac).trim().toLowerCase() : null;
         return { ip: normalizedIp, mac: normalizedMac };
+    }
+
+    extractIpv4(rawIp) {
+        if (!rawIp || !String(rawIp).trim()) {
+            return null;
+        }
+
+        const text = String(rawIp).trim();
+        if (text.includes('[MISSING:')) {
+            return null;
+        }
+
+        const match = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+        if (!match) {
+            return null;
+        }
+
+        return match[0];
     }
 
     normalizePolicyOptions(policy = {}) {

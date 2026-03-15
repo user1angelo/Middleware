@@ -248,14 +248,10 @@ public class WorkflowLoader {
                     int colonIndex = trimmed.indexOf(':');
                     if (colonIndex > 0 && colonIndex < trimmed.length() - 1) {
                         String key = trimmed.substring(0, colonIndex).trim();
-                        String val = trimmed.substring(colonIndex + 1).trim();
+                        String val = cleanedYamlScalar(trimmed.substring(colonIndex + 1).trim());
                         // Skip YAML structural keys
                         if (key.equals("type") || key.equals("event") || key.equals("action") || key.equals("name")) {
                             continue;
-                        }
-                        // Remove quotes
-                        if (val.startsWith("\"") && val.endsWith("\"")) {
-                            val = val.substring(1, val.length() - 1);
                         }
                         if (!key.isEmpty() && !val.isEmpty()) {
                             eventData.put(key, val);
@@ -280,6 +276,51 @@ public class WorkflowLoader {
         step.setAction(action);
         
         return step;
+    }
+
+    private String cleanedYamlScalar(String raw) {
+        if (raw == null) {
+            return "";
+        }
+
+        String value = raw.trim();
+        if (value.isEmpty()) {
+            return value;
+        }
+
+        value = stripInlineComment(value).trim();
+
+        if ((value.startsWith("\"") && value.endsWith("\""))
+                || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length() - 1).trim();
+        }
+
+        return value;
+    }
+
+    private String stripInlineComment(String value) {
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+
+            if (current == '\'' && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+                continue;
+            }
+
+            if (current == '"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+                continue;
+            }
+
+            if (current == '#' && !inSingleQuote && !inDoubleQuote) {
+                return value.substring(0, i);
+            }
+        }
+
+        return value;
     }
     
     /**
