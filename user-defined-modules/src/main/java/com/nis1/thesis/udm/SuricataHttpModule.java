@@ -6,11 +6,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -60,7 +58,6 @@ public class SuricataHttpModule implements PluggableModule {
     private int minThreatScore = 75;
     private String severityThreshold = "high"; // "critical" or "high"
     private String[] highRiskCategories = { "ransomware", "apt_activity", "c2_communication", "malware" };
-    private final Set<String> protectedAutoIsolationHosts = new LinkedHashSet<>();
     private long isolationCooldownMs = 120000;
     private int isolationCooldownCacheMaxSize = 5000;
 
@@ -151,16 +148,6 @@ public class SuricataHttpModule implements PluggableModule {
             String categoriesStr = props.getProperty("suricata.auto_isolate.categories",
                     "ransomware,apt_activity,c2_communication,malware");
             highRiskCategories = categoriesStr.split(",");
-            String protectedHosts = props.getProperty("suricata.auto_isolate.protected_hosts", "");
-            protectedAutoIsolationHosts.clear();
-            if (!protectedHosts.isBlank()) {
-                for (String host : protectedHosts.split(",")) {
-                    String normalizedHost = host.trim().toLowerCase();
-                    if (!normalizedHost.isEmpty()) {
-                        protectedAutoIsolationHosts.add(normalizedHost);
-                    }
-                }
-            }
                 isolationCooldownMs = Long.parseLong(props.getProperty("suricata.auto_isolate.cooldown_ms", "120000"));
                 isolationCooldownCacheMaxSize = Integer.parseInt(
                     props.getProperty("suricata.auto_isolate.cooldown.max_entries", "5000"));
@@ -171,8 +158,6 @@ public class SuricataHttpModule implements PluggableModule {
 
             System.out.println("[SuricataHttpModule] Loaded config from " + CONFIG_PATH);
             System.out.println("[SuricataHttpModule] Auto-isolation enabled: " + autoIsolateEnabled);
-                System.out.println("[SuricataHttpModule] Auto-isolation protected hosts count: "
-                    + protectedAutoIsolationHosts.size());
                 System.out.println("[SuricataHttpModule] Isolation cooldown enabled: " + (isolationCooldownMs > 0)
                     + " (cooldown_ms=" + isolationCooldownMs + ", max_entries=" + isolationCooldownCacheMaxSize + ")");
             System.out.println("[SuricataHttpModule] Alert dedup enabled: " + dedupEnabled +
@@ -397,12 +382,6 @@ public class SuricataHttpModule implements PluggableModule {
     private void triggerAutomatedIsolation(SuricataAlertData alert) {
         String targetHost = alert.getSourceIp();
 
-        if (isProtectedAutoIsolationTarget(targetHost)) {
-            helper.log(getName(), "WARN",
-                    String.format("Skipped auto-isolation for protected host %s", targetHost));
-            return;
-        }
-
         if (!shouldPublishIsolationForHost(targetHost)) {
             helper.log(getName(), "INFO",
                     String.format("Suppressed duplicate auto-isolation for %s inside cooldown window (%d ms)",
@@ -429,13 +408,6 @@ public class SuricataHttpModule implements PluggableModule {
 
         helper.log(getName(), "INFO",
                 String.format("Published mitigation command: ISOLATE_VLAN for %s", targetHost));
-    }
-
-    private boolean isProtectedAutoIsolationTarget(String targetHost) {
-        if (targetHost == null || targetHost.isBlank()) {
-            return false;
-        }
-        return protectedAutoIsolationHosts.contains(targetHost.trim().toLowerCase());
     }
 
     private boolean shouldPublishIsolationForHost(String targetHost) {

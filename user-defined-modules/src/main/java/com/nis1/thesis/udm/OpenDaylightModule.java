@@ -45,7 +45,6 @@ public class OpenDaylightModule implements PluggableModule {
     private String defaultPolicyMode = "strict_bi_directional";
     private boolean defaultContainArp = true;
     private boolean defaultContainDhcp = true;
-    private int quarantineFlowTableId = 0;
 
     private volatile boolean running = false;
 
@@ -63,14 +62,12 @@ public class OpenDaylightModule implements PluggableModule {
 
         // Initialize services
         this.scanner = new NetworkScannerService(helper, getName());
-        this.odlClient = new OpenDaylightClient(helper, getName(), odlBaseUrl, odlUsername, odlPassword,
-            quarantineFlowTableId);
+        this.odlClient = new OpenDaylightClient(helper, getName(), odlBaseUrl, odlUsername, odlPassword);
 
         this.running = true;
 
         helper.log(getName(), "INFO", "Initializing OpenDaylightModule... [VERSION 2.0 CHECK]");
         helper.log(getName(), "INFO", "Connected to ODL at: " + odlBaseUrl);
-        helper.log(getName(), "INFO", "Quarantine flow table ID: " + quarantineFlowTableId);
 
         // Subscribe to events
         api.subscribeToEvent("odl.topology.discover", this::onTopologyDiscover);
@@ -430,13 +427,6 @@ public class OpenDaylightModule implements PluggableModule {
             defaultPolicyMode = props.getProperty("mitigation.policy.mode", defaultPolicyMode);
             defaultContainArp = Boolean.parseBoolean(props.getProperty("mitigation.containment.arp", String.valueOf(defaultContainArp)));
             defaultContainDhcp = Boolean.parseBoolean(props.getProperty("mitigation.containment.dhcp", String.valueOf(defaultContainDhcp)));
-            String tableId = props.getProperty("mitigation.flow.table_id", String.valueOf(quarantineFlowTableId));
-            try {
-                quarantineFlowTableId = Integer.parseInt(tableId);
-            } catch (NumberFormatException ex) {
-                helper.log(getName(), "WARN", "Invalid mitigation.flow.table_id='" + tableId
-                        + "' (using default " + quarantineFlowTableId + ")");
-            }
         } catch (IOException e) {
             System.out.println("[OpenDaylightModule] Using default config");
         }
