@@ -1,0 +1,19 @@
+name: "Zeek Nmap Reconnaissance → SDN Containment"
+version: 1.0
+description: >
+  Detects reconnaissance behaviors (ping sweeps, address scans, port scans) and isolates the source host via SDN.
+
+trigger:
+  event_type: "alerts.network.zeek"
+  condition: "{{ trigger.payload.alert_type contains 'nmap_recon' and trigger.payload.severity != 'low' }}"
+
+steps:
+  - name: "Contain recon source host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "Reconnaissance activity detected (scan/sweep)."

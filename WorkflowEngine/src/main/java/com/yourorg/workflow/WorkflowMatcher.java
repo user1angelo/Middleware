@@ -35,6 +35,14 @@ public class WorkflowMatcher {
         if (workflow.getTrigger() == null) {
             return false;
         }
+
+        String expectedEventType = workflow.getTrigger().getEventType();
+        if (expectedEventType != null && !expectedEventType.isEmpty()) {
+            String actualEventType = alert.optString("event_type", "");
+            if (!expectedEventType.equals(actualEventType)) {
+                return false;
+            }
+        }
         
         String condition = workflow.getTrigger().getCondition();
         if (condition == null || condition.isEmpty()) {

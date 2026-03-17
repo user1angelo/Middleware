@@ -1,0 +1,19 @@
+name: "Suricata DNS Amplification Indicators → SDN Isolation"
+version: 1.0
+description: >
+  Responds to DNS amplification indicator alerts and isolates the suspected host via OpenDaylight.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  condition: "{{ trigger.payload.alert_type contains 'dns_amplification' and trigger.payload.severity != 'low' }}"
+
+steps:
+  - name: "Isolate suspected amplifier or victim host"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "DNS amplification indicators detected (UDP/53 volumetric anomaly)."

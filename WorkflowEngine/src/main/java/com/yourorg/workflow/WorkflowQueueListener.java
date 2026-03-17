@@ -80,18 +80,11 @@ public class WorkflowQueueListener {
                     System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
                     return;
                 }
-                
-                // Check if alert is ransomware-related
-                if (!isRansomwareAlert(alert)) {
-                    System.out.println("⚠️  Not a ransomware alert, skipping workflow processing");
-                    System.out.println("   Values checked: " + alert.toString());
-                    channel.basicAck(deliveryTag, false);
-                    System.out.println("✅ ACK sent");
-                    System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-                    return;
+               
+                boolean ransomwareAlert = isRansomwareAlert(alert);
+                if (ransomwareAlert) {
+                    normalizeAlertForRansomwareWorkflows(alert);
                 }
-
-                normalizeAlertForRansomwareWorkflows(alert);
                 
                 // Extract alert details
                 if (alert.has("payload")) {
@@ -118,11 +111,11 @@ public class WorkflowQueueListener {
                 System.out.println("\n🔍 Looking for general ransomware workflow...");
                 Workflow generalWorkflow = workflowLoader.findGeneralWorkflow(allWorkflows);
                 
-                if (generalWorkflow != null) {
+                if (generalWorkflow != null && ransomwareAlert) {
                     System.out.println("✅ Found general workflow: " + generalWorkflow.getName());
                     workflowExecutor.executeWorkflow(generalWorkflow, alert, channel);
                 } else {
-                    System.err.println("⚠️  No general workflow found!");
+                    System.err.println("⚠️  No general workflow found or alert is not ransomware!");
                 }
                 
                 // Find and execute specific matching workflows

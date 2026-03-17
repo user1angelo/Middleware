@@ -663,8 +663,10 @@ public class ZeekModule {
             return "malware";
         } else if (combined.contains("c2") || combined.contains("command and control")) {
             return "c2_communication";
-        } else if (combined.contains("scan")) {
-            return "reconnaissance";
+        } else if (combined.contains("scan::port_scan") && combined.contains("syn")) {
+            return "tcp_syn_scan";
+        } else if (combined.contains("scan::port_scan") || combined.contains("scan::address_scan")) {
+            return "nmap_recon";
         } else if (combined.contains("lateral")) {
             return "lateral_movement";
         } else if (combined.contains("smb")) {

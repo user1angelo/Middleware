@@ -152,6 +152,9 @@ public class SdkModuleHost {
             // Deserialize based on event type
             if ("INITIATE_MITIGATION".equals(eventType) || "REMOVE_MITIGATION".equals(eventType)) {
                 payload = parseMitigationCommand(json);
+            } else if ("INSTALL_PROACTIVE_POLICY".equals(eventType)) {
+                JSONObject policyPayload = json.optJSONObject("payload");
+                payload = policyPayload != null ? policyPayload : json;
             } else if ("ODL_TOPOLOGY_DISCOVER".equals(eventType)) {
                 payload = json; // Pass full JSON
             } else if (eventType.startsWith("odl.")) {

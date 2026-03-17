@@ -1,0 +1,19 @@
+name: "ARP Spoofing Detection → SDN Quarantine"
+version: 1.0
+description: >
+  Quarantines a host when ARP spoofing/poisoning indicators are detected.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  condition: "{{ trigger.payload.alert_type contains 'arp_spoofing' and trigger.payload.severity != 'low' }}"
+
+steps:
+  - name: "Quarantine suspected ARP spoofer"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "QUARANTINE"
+          justification: "ARP spoofing/poisoning indicators detected."

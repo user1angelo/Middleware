@@ -1,0 +1,19 @@
+name: "Zeek TCP SYN Scan → SDN Isolation"
+version: 1.0
+description: >
+  Detects TCP SYN probing/scan alerts emitted by the Zeek module and triggers host isolation via OpenDaylight.
+
+trigger:
+  event_type: "alerts.network.zeek"
+  condition: "{{ trigger.payload.alert_type contains 'tcp_syn_scan' and trigger.payload.severity == 'high' }}"
+
+steps:
+  - name: "Isolate host via SDN (OpenDaylight)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "TCP SYN scan detected from source host."

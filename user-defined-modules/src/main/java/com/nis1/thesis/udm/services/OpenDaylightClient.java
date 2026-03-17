@@ -214,6 +214,67 @@ public class OpenDaylightClient {
         return allRemovedOrAbsent;
     }
 
+    public boolean applyProtocolDrop(String sourceIp, int ipProtocol, String mitigationId) {
+        String normalizedIp = normalizeIp(sourceIp);
+        if (normalizedIp == null) {
+            helper.log(moduleName, "ERROR", "Cannot apply protocol drop: missing source IP");
+            return false;
+        }
+
+        String normalizedMitigationId = mitigationId != null && !mitigationId.isBlank()
+                ? mitigationId.trim()
+                : "mit-" + System.currentTimeMillis();
+        String targetKey = buildTargetKey(normalizedIp, null);
+
+        MitigationRecord existingById = ownedMitigations.get(normalizedMitigationId);
+        if (existingById != null && !existingById.installedFlows.isEmpty()) {
+            helper.log(moduleName, "INFO", "Duplicate mitigation event ignored (already active): "
+                + normalizedMitigationId + " target=" + targetKey);
+            return true;
+        }
+
+        String activeMitigationForTarget = targetIndex.get(targetKey);
+        if (activeMitigationForTarget != null && !activeMitigationForTarget.equals(normalizedMitigationId)) {
+            MitigationRecord activeRecord = ownedMitigations.get(activeMitigationForTarget);
+            if (activeRecord != null && !activeRecord.installedFlows.isEmpty()) {
+                helper.log(moduleName, "INFO", "Mitigation already active for target " + targetKey
+                    + " (active=" + activeMitigationForTarget + ", incoming=" + normalizedMitigationId
+                    + "); duplicate protocol drop request ignored");
+                return true;
+            }
+
+            targetIndex.remove(targetKey, activeMitigationForTarget);
+        }
+
+        Set<String> candidateNodes = resolveCandidateNodesForTarget(normalizedIp, null);
+        MitigationRecord record = new MitigationRecord(normalizedMitigationId, normalizedIp, null);
+
+        int installedCount = 0;
+        for (String nodeId : candidateNodes) {
+            String flowToken = "proto_drop_" + ipProtocol;
+            String flowId = buildSystemFlowId(normalizedMitigationId, flowToken);
+            String payload = buildProtocolDropFlowJson(flowId, normalizedIp, ipProtocol);
+            int responseCode = sendFlowRequestWithRetry("PUT", nodeId, flowId, payload);
+            if (responseCode >= 200 && responseCode < 300) {
+                installedCount++;
+                record.installedFlows.add(new OwnedFlow(nodeId, flowId));
+            }
+        }
+
+        if (record.installedFlows.isEmpty()) {
+            helper.log(moduleName, "ERROR", "Failed to install protocol drop rule for mitigation " + normalizedMitigationId);
+            return false;
+        }
+
+        ownedMitigations.put(normalizedMitigationId, record);
+        targetIndex.put(targetKey, normalizedMitigationId);
+
+        helper.log(moduleName, "INFO", "Protocol drop rules applied: " + installedCount
+                + " (mitigation_id=" + normalizedMitigationId + ", ip=" + normalizedIp
+                + ", ip_protocol=" + ipProtocol + ")");
+        return true;
+    }
+
     private boolean removeOwnedFlowsByMitigationPrefix(String mitigationId) {
         String mitigationPrefix = SYSTEM_FLOW_PREFIX + "_" + sanitize(mitigationId) + "_";
         Set<String> nodes = fetchAllOpenFlowNodes();
@@ -714,6 +775,27 @@ public class OpenDaylightClient {
         flow.put("table_id", quarantineTableId);
         flow.put("priority", ISOLATION_PRIORITY);
         flow.put("match", buildMatch(ipAddress, macAddress, token));
+        flow.put("instructions", buildDropInstruction());
+
+        JSONArray flows = new JSONArray();
+        flows.put(flow);
+
+        JSONObject payload = new JSONObject();
+        payload.put("flow", flows);
+        return payload.toString();
+    }
+
+    private String buildProtocolDropFlowJson(String flowId, String ipAddress, int ipProtocol) {
+        JSONObject match = new JSONObject();
+        match.put("ipv4-source", ipAddress + "/32");
+        match.put("ethernet-match", ethernetType(2048));
+        match.put("ip-match", new JSONObject().put("ip-protocol", ipProtocol));
+
+        JSONObject flow = new JSONObject();
+        flow.put("id", flowId);
+        flow.put("table_id", quarantineTableId);
+        flow.put("priority", ISOLATION_PRIORITY);
+        flow.put("match", match);
         flow.put("instructions", buildDropInstruction());
 
         JSONArray flows = new JSONArray();

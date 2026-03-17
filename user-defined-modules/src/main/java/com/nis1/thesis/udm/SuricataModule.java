@@ -492,6 +492,14 @@ public class SuricataModule {
 
         String lower = signature.toLowerCase();
 
+        if (lower.contains("dns") && (lower.contains("amplification") || lower.contains("dns amp"))) {
+            return "dns_amplification";
+        } else if (lower.contains("icmp") && (lower.contains("flood") || lower.contains("ping"))) {
+            return "icmp_flood";
+        } else if (lower.contains("arp") && (lower.contains("spoof") || lower.contains("poison"))) {
+            return "arp_spoofing";
+        }
+
         if (lower.contains("wannacry") || lower.contains("eternalblue") || lower.contains("ms17-010")
                 || lower.contains("doublepulsar")) {
             return "ransomware";

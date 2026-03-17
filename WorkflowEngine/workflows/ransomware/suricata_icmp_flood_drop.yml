@@ -1,0 +1,21 @@
+name: "Suricata ICMP Flood → SDN Protocol Drop"
+version: 1.0
+description: >
+  Detects ICMP flood indicators and installs an SDN rule to drop ICMP (IP protocol 1) from the offending source.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  condition: "{{ trigger.payload.alert_type contains 'icmp_flood' and trigger.payload.severity != 'low' }}"
+
+steps:
+  - name: "Drop ICMP from offender via OpenDaylight"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INSTALL_PROACTIVE_POLICY"
+        data:
+          policy_name: "drop_icmp_from_offender"
+          policy_type: "protocol_drop"
+          protocol: "icmp"
+          source_ip: "{{ trigger.payload.source_ip }}"
+          justification: "ICMP echo request flood detected."

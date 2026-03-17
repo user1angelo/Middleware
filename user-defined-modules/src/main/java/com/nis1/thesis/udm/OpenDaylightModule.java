@@ -308,6 +308,9 @@ public class OpenDaylightModule implements PluggableModule {
                 case "port_security":
                     success = installPortSecurityPolicy(policyData);
                     break;
+                case "protocol_drop":
+                    success = installProtocolDropPolicy(policyData);
+                    break;
                 default:
                     helper.log(getName(), "WARN", "Unknown policy type: " + policyType);
                     return;
@@ -414,6 +417,41 @@ public class OpenDaylightModule implements PluggableModule {
 
         } catch (Exception e) {
             helper.log(getName(), "ERROR", "Failed to install port security policy: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean installProtocolDropPolicy(JSONObject policyData) {
+        try {
+            String protocol = policyData.optString("protocol", "").trim().toLowerCase();
+            String sourceIp = policyData.optString("source_ip", "").trim();
+            String policyName = policyData.optString("policy_name", "protocol_drop");
+
+            if (protocol.isEmpty() || sourceIp.isEmpty()) {
+                helper.log(getName(), "WARN", "protocol_drop policy missing protocol or source_ip");
+                return false;
+            }
+
+            int ipProtocol;
+            if ("icmp".equals(protocol)) {
+                ipProtocol = 1;
+            } else if ("tcp".equals(protocol)) {
+                ipProtocol = 6;
+            } else if ("udp".equals(protocol)) {
+                ipProtocol = 17;
+            } else {
+                helper.log(getName(), "WARN", "Unsupported protocol for protocol_drop: " + protocol);
+                return false;
+            }
+
+            String mitigationId = "policy-" + policyName + "-" + sourceIp + "-" + ipProtocol;
+            boolean success = odlClient.applyProtocolDrop(sourceIp, ipProtocol, mitigationId);
+            if (success) {
+                helper.log(getName(), "INFO", "Installed protocol drop: protocol=" + protocol + " ip=" + sourceIp);
+            }
+            return success;
+        } catch (Exception e) {
+            helper.log(getName(), "ERROR", "Failed to install protocol_drop policy: " + e.getMessage());
             return false;
         }
     }
