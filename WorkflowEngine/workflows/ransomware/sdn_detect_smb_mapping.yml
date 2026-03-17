@@ -1,0 +1,53 @@
+name: "SDN Detect SMB Mapping"
+version: 1.0
+description: >
+  Detects remote SMB drive mapping events forwarded from Zeek.
+  Since SMB mapping is a primary technique used by ransomware (like WannaCry, Ryuk, Conti) 
+  and APTs for propagation and lateral movement, this workflow automatically triggers 
+  immediate network isolation via OpenDaylight and alerts the SOC.
+
+trigger:
+  event_type: "alerts.network.zeek"
+  # The forwarder script explicitly marks smb_mapping.log events with the note 'SMB::Mapping'
+  condition: "{{ trigger.payload.note_type contains 'SMB::Mapping' }}"
+
+steps:
+  - name: "Log SMB Mapping Event"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "LATERAL_MOVEMENT_DETECTED"
+        data:
+          event_id: "{{ trigger.event_id }}"
+          source_ip: "{{ trigger.payload.source_ip }}"
+          severity: "high"
+          alert_type: "LateralMovement.SMBMapping"
+          note_type: "{{ trigger.payload.note_type }}"
+          timestamp: "{{ trigger.timestamp }}"
+          
+  - name: "Initiate Host Network Isolation (ODL)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          sdn_controller: "opendaylight"
+          priority: "high"
+          justification: "Suspicious SMB drive mapping ({{ trigger.payload.note_type }}) detected from {{ trigger.payload.source_ip }}. Automatically isolating host."
+          source_event_id: "{{ trigger.event_id }}"
+
+  - name: "Alert SOC"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SOC_ALERT"
+        data:
+          alert_level: "high"
+          incident_type: "smb_drive_mapping"
+          affected_host: "{{ trigger.payload.source_ip }}"
+          severity: "high"
+          action_taken: "HOST_ISOLATED"
+          requires_investigation: true
+          message: "HIGH: Suspicious SMB drive mapping event detected originating from {{ trigger.payload.source_ip }}. Automatically isolated via SDN to prevent potential ransomware propagation."
