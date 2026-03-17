@@ -791,7 +791,7 @@ public class OpenDaylightClient {
 
         JSONObject flow = new JSONObject();
         flow.put("id", flowId);
-        flow.put("table_id", quarantineTableId);
+        flow.put("table_id", DEFAULT_TABLE);
         flow.put("priority", ISOLATION_PRIORITY);
         flow.put("match", match);
         flow.put("instructions", buildDropInstruction());
