@@ -1,5 +1,7 @@
 package com.nis1.thesis.udm;
 
+import com.google.gson.annotations.SerializedName;
+
 /**
  * ZeekAlertData - Comprehensive payload for Zeek NSM notices
  * 
@@ -15,30 +17,47 @@ package com.nis1.thesis.udm;
 public class ZeekAlertData {
 
     // Alert identification
+    @SerializedName("alert_id")
     private String alertId;
+    @SerializedName("note_type")
     private String noteType; // Zeek notice type (e.g., Scan::Port_Scan)
+    @SerializedName("signature")
     private String signature; // Notice message
+    @SerializedName("sub_message")
     private String subMessage; // Additional notice details
 
     // Network information
+    @SerializedName("source_ip")
     private String sourceIp;
+    @SerializedName("destination_ip")
     private String destinationIp;
+    @SerializedName("source_port")
     private Integer sourcePort;
+    @SerializedName("destination_port")
     private Integer destinationPort;
+    @SerializedName("protocol")
     private String protocol;
 
     // Classification
+    @SerializedName("severity")
     private String severity; // critical, high, medium, low
+    @SerializedName("category")
     private String category; // ransomware, malware, reconnaissance, etc.
+    @SerializedName("alert_type")
     private String alertType; // Same as category for consistency
 
     // Threat scoring
+    @SerializedName("threat_score")
     private Integer threatScore; // 0-100
+    @SerializedName("confidence_score")
     private Integer confidenceScore; // 0-100
 
     // Optional Zeek-specific metadata
+    @SerializedName("uid")
     private String uid; // Zeek connection UID
+    @SerializedName("zeek_timestamp")
     private String zeekTimestamp; // Original Zeek timestamp
+    @SerializedName("actions")
     private String actions; // Actions taken by Zeek
 
     /**

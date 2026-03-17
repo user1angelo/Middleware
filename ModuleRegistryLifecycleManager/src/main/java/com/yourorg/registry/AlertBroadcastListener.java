@@ -216,7 +216,8 @@ public class AlertBroadcastListener implements Runnable {
                     ? alert.getJSONObject("payload").optString("severity", "unknown")
                     : "unknown";
             String alertType = alert.optJSONObject("payload") != null
-                    ? alert.getJSONObject("payload").optString("alert_type", "unknown")
+                    ? alert.getJSONObject("payload").optString("alert_type",
+                        alert.getJSONObject("payload").optString("alertType", "unknown"))
                     : "unknown";
 
             System.out.println("📤 Broadcasted alert | Severity: " + severity +
