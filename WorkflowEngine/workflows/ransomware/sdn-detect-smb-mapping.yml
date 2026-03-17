@@ -1,0 +1,54 @@
+name: "SDN Detect SMB Mapping"
+version: 1.1
+description: >
+  Enterprise-grade ransomware defense. Detects remote SMB drive mapping events forwarded from Zeek.
+  SMB drive mapping is an imminent precursor to mass-encryption used by advanced human-operated 
+  ransomware syndicates (Ryuk, Conti, LockBit, BlackBasta) to encrypt network drives.
+  This workflow treats the event as a CRITICAL ransomware threat and mandates immediate 
+  network isolation (quarantine) via OpenDaylight and alerts the SOC.
+
+trigger:
+  event_type: "alerts.network.zeek"
+  # The forwarder script explicitly marks smb_mapping.log events with the note 'SMB::Mapping'
+  condition: "{{ trigger.payload.note_type contains 'SMB::Mapping' }}"
+
+steps:
+  - name: "Log Ransomware Propagation Attempt"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "RANSOMWARE_PRECURSOR_DETECTED"
+        data:
+          event_id: "{{ trigger.event_id }}"
+          source_ip: "{{ trigger.payload.source_ip }}"
+          severity: "critical"
+          alert_type: "Ransomware.LateralMovement.SMBMapping"
+          note_type: "{{ trigger.payload.note_type }}"
+          timestamp: "{{ trigger.timestamp }}"
+          
+  - name: "Initiate Emergency Host Quarantine (ODL)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          sdn_controller: "opendaylight"
+          priority: "critical"
+          justification: "CRITICAL: Ransomware precursor (SMB Mapping) detected from {{ trigger.payload.source_ip }}. Mandating immediate host quarantine to prevent enterprise-wide encryption."
+          source_event_id: "{{ trigger.event_id }}"
+
+  - name: "Alert Enterprise SOC"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SOC_ALERT"
+        data:
+          alert_level: "critical"
+          incident_type: "ransomware_smb_propagation"
+          affected_host: "{{ trigger.payload.source_ip }}"
+          severity: "critical"
+          action_taken: "HOST_ISOLATED"
+          requires_investigation: true
+          message: "CRITICAL: Imminent ransomware propagation threat (SMB Drive Mapping) detected emanating from {{ trigger.payload.source_ip }}. Threat actors map network drives prior to mass-encryption routing (e.g., LockBit, Ryuk). Host has been instantly quarantined via SDN."
