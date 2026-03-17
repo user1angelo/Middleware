@@ -1,0 +1,54 @@
+name: "SDN Detect Advanced Lateral Movement"
+version: 1.0
+description: >
+  Detects advanced lateral movement techniques over SMB and RPC, specifically the remote execution of DLLs (RunDll) 
+  and remote interaction with the Service Control Manager (SVCCTL).
+  These techniques are heavily utilized by advanced persistent threats (APTs) and ransomware (like Ryuk/Conti) 
+  for propagation and persistence.
+  Triggers immediate network isolation via OpenDaylight and sends a critical alert to the SOC.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  # Matches the 'RunDll Request' and 'DCERPC SVCCTL' signatures
+  condition: "{{ trigger.payload.signature contains 'RunDll Request' or trigger.payload.signature contains 'DCERPC SVCCTL' }}"
+
+steps:
+  - name: "Log Advanced Lateral Movement Event"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "LATERAL_MOVEMENT_DETECTED"
+        data:
+          event_id: "{{ trigger.event_id }}"
+          source_ip: "{{ trigger.payload.source_ip }}"
+          severity: "critical"
+          alert_type: "LateralMovement.Advanced"
+          signature: "{{ trigger.payload.signature }}"
+          timestamp: "{{ trigger.timestamp }}"
+          
+  - name: "Initiate Host Network Isolation (ODL)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          sdn_controller: "opendaylight"
+          priority: "critical"
+          justification: "Critical advanced lateral movement ({{ trigger.payload.signature }}) detected from {{ trigger.payload.source_ip }}. Automatically isolating host."
+          source_event_id: "{{ trigger.event_id }}"
+
+  - name: "Alert SOC"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SOC_ALERT"
+        data:
+          alert_level: "critical"
+          incident_type: "advanced_lateral_movement"
+          affected_host: "{{ trigger.payload.source_ip }}"
+          severity: "critical"
+          action_taken: "HOST_ISOLATED"
+          requires_investigation: true
+          message: "CRITICAL: Advanced lateral movement detected ({{ trigger.payload.signature }}) originating from {{ trigger.payload.source_ip }} using RPC/SMB execution. Automatically isolated via SDN."
