@@ -538,6 +538,8 @@ public class SuricataModule {
             return "information_leak";
         } else if (lower.contains("policy violation")) {
             return "policy_violation";
+        } else if (lower.contains("corporate privacy violation")) {
+            return "policy_violation";
         }
 
         // Generic / vague classifications → return null to fall through to signature-based
@@ -565,6 +567,13 @@ public class SuricataModule {
         // - "ET TROJAN Ryuk Encrypted File"
         if (lower.contains("ryuk") || lower.contains(".ryk") || lower.contains("rykreadme")) {
             return "ransomware";
+        }
+
+        // SMB admin share access policy signatures (e.g., "POLICY SMB C$ Share Access")
+        if (lower.contains("smb") &&
+                ((lower.contains("c$") && lower.contains("share access"))
+                        || lower.contains("admin$"))) {
+            return "smb_admin_share_access";
         }
 
         if (lower.contains("dns") && (lower.contains("amplification") || lower.contains("dns amp"))) {
