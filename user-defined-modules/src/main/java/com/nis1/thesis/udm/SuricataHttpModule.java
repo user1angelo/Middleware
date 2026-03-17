@@ -445,6 +445,13 @@ public class SuricataHttpModule implements PluggableModule {
      * to signature-based categorization for generic classifications.
      */
     private String resolveCategory(String suricataClassification, String signature) {
+        // If the signature strongly indicates ransomware (e.g., custom Ryuk rules),
+        // prefer that over broad Suricata classifications like "network trojan".
+        String signatureCategory = categorizeFromSignature(signature);
+        if ("ransomware".equals(signatureCategory)) {
+            return signatureCategory;
+        }
+
         // 1. Try to get a specific category from the Suricata classification
         if (suricataClassification != null && !suricataClassification.isBlank()) {
             String mapped = mapSuricataClassification(suricataClassification);
@@ -454,7 +461,7 @@ public class SuricataHttpModule implements PluggableModule {
         }
 
         // 2. Fall through to signature-based categorization
-        return categorizeFromSignature(signature);
+        return signatureCategory;
     }
 
     /**
@@ -507,6 +514,14 @@ public class SuricataHttpModule implements PluggableModule {
         if (signature == null)
             return "unknown";
         String lower = signature.toLowerCase();
+
+        // Ransomware families / indicators (custom rules, e.g., Ryuk)
+        // Example msgs:
+        // - "ET TROJAN Ryuk Ransom Note"
+        // - "ET TROJAN Ryuk Encrypted File"
+        if (lower.contains("ryuk") || lower.contains(".ryk") || lower.contains("rykreadme")) {
+            return "ransomware";
+        }
 
         // Lateral movement detection (SMB-based tools and techniques)
         if (lower.contains("lateral movement") || lower.contains("lateral_movement")
