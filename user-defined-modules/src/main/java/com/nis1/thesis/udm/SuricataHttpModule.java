@@ -57,7 +57,7 @@ public class SuricataHttpModule implements PluggableModule {
     private boolean autoIsolateEnabled = true;
     private int minThreatScore = 75;
     private String severityThreshold = "high"; // "critical" or "high"
-    private String[] highRiskCategories = { "ransomware", "apt_activity", "c2_communication", "malware" };
+    private String[] highRiskCategories = { "ransomware", "apt_activity", "c2_communication", "malware", "lateral_movement" };
     private long isolationCooldownMs = 120000;
     private int isolationCooldownCacheMaxSize = 5000;
 
@@ -270,10 +270,8 @@ public class SuricataHttpModule implements PluggableModule {
         payload.setDestinationPort(eveLog.destPort != null ? eveLog.destPort : 0);
         payload.setProtocol(eveLog.proto != null ? eveLog.proto : "UNKNOWN");
 
-        // Classification
-        String category = eveLog.alert.category != null
-                ? eveLog.alert.category.toLowerCase().replace(" ", "_")
-                : categorizeFromSignature(eveLog.alert.signature);
+        // Classification - resolve from both Suricata classification and signature
+        String category = resolveCategory(eveLog.alert.category, eveLog.alert.signature);
         payload.setCategory(category);
         payload.setAlertType(category);
 
@@ -441,12 +439,84 @@ public class SuricataHttpModule implements PluggableModule {
     // Utility methods and eve.json structures
     // ---------------------------------------------------------------------
 
+    /**
+     * Resolve the best category by considering both Suricata classification and signature.
+     * Maps known Suricata classifications to specific event types, and falls through
+     * to signature-based categorization for generic classifications.
+     */
+    private String resolveCategory(String suricataClassification, String signature) {
+        // 1. Try to get a specific category from the Suricata classification
+        if (suricataClassification != null && !suricataClassification.isBlank()) {
+            String mapped = mapSuricataClassification(suricataClassification);
+            if (mapped != null) {
+                return mapped;
+            }
+        }
+
+        // 2. Fall through to signature-based categorization
+        return categorizeFromSignature(signature);
+    }
+
+    /**
+     * Map Suricata classification strings to specific, meaningful event type categories.
+     * Returns null for generic/vague classifications that should be resolved by signature.
+     */
+    private String mapSuricataClassification(String classification) {
+        if (classification == null) return null;
+        String lower = classification.toLowerCase().trim();
+
+        // Specific, meaningful classifications
+        if (lower.contains("user privilege gain") || lower.contains("admin privilege gain")) {
+            return "attempted_privilege_gain";
+        } else if (lower.contains("administrator privilege")) {
+            return "attempted_admin_privilege_gain";
+        } else if (lower.contains("network trojan")) {
+            return "network_trojan_detected";
+        } else if (lower.contains("web application attack")) {
+            return "web_application_attack";
+        } else if (lower.contains("attempted denial of service")) {
+            return "denial_of_service";
+        } else if (lower.contains("successful user privilege gain")) {
+            return "successful_privilege_gain";
+        } else if (lower.contains("successful admin")) {
+            return "successful_admin_privilege_gain";
+        } else if (lower.contains("trojan activity") || lower.contains("a]trojan")) {
+            return "malware";
+        } else if (lower.contains("exploit kit")) {
+            return "exploit";
+        } else if (lower.contains("attempted information leak") || lower.contains("information leak")) {
+            return "information_leak";
+        } else if (lower.contains("policy violation")) {
+            return "policy_violation";
+        }
+
+        // Generic / vague classifications → return null to fall through to signature-based
+        if (lower.contains("potentially bad traffic")
+                || lower.contains("misc activity")
+                || lower.contains("misc attack")
+                || lower.contains("not suspicious")
+                || lower.contains("unknown")) {
+            return null; // let categorizeFromSignature() handle it
+        }
+
+        // Default: normalize the classification as-is for any unmapped specific ones
+        return classification.toLowerCase().replace(" ", "_");
+    }
+
     private String categorizeFromSignature(String signature) {
         if (signature == null)
             return "unknown";
         String lower = signature.toLowerCase();
 
-        if (lower.contains("malware") || lower.contains("trojan")) {
+        // Lateral movement detection (SMB-based tools and techniques)
+        if (lower.contains("lateral movement") || lower.contains("lateral_movement")
+                || (lower.contains("smb") && (lower.contains("wmi") || lower.contains("wmic")
+                        || lower.contains("rundll") || lower.contains("psexec")
+                        || lower.contains("ipconfig") || lower.contains(".mof")
+                        || lower.contains("mof ") || lower.contains("managed object"))))
+        {
+            return "lateral_movement";
+        } else if (lower.contains("malware") || lower.contains("trojan")) {
             return "malware";
         } else if (lower.contains("exploit") || lower.contains("cve-")) {
             return "exploit";
@@ -500,7 +570,8 @@ public class SuricataHttpModule implements PluggableModule {
 
         if (category != null) {
             String lower = category.toLowerCase();
-            if (lower.contains("apt") || lower.contains("ransomware")) {
+            if (lower.contains("apt") || lower.contains("ransomware")
+                    || lower.contains("lateral_movement") || lower.contains("privilege_gain")) {
                 baseScore += 10;
             } else if (lower.contains("malware") || lower.contains("trojan")) {
                 baseScore += 5;

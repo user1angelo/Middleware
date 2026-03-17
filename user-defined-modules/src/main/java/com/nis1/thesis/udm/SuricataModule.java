@@ -440,9 +440,8 @@ public class SuricataModule {
         payloadData.setDestinationPort(eveLog.destPort != null ? eveLog.destPort : 0);
         payloadData.setProtocol(eveLog.proto != null ? eveLog.proto : "UNKNOWN");
 
-        // Determine category
-        String category = eveLog.alert.category != null ? eveLog.alert.category.toLowerCase().replace(" ", "_")
-                : categorizeFromSignature(eveLog.alert.signature);
+        // Determine category - resolve from both Suricata classification and signature
+        String category = resolveCategory(eveLog.alert.category, eveLog.alert.signature);
         payloadData.setCategory(category);
         payloadData.setAlertType(category);
 
@@ -484,8 +483,69 @@ public class SuricataModule {
     // ---------------------------------------------------------------------
 
     /**
-     * Categorizes alert based on signature content
+     * Resolve the best category by considering both Suricata classification and signature.
+     * Maps known Suricata classifications to specific event types, and falls through
+     * to signature-based categorization for generic classifications.
      */
+    private static String resolveCategory(String suricataClassification, String signature) {
+        // 1. Try to get a specific category from the Suricata classification
+        if (suricataClassification != null && !suricataClassification.isBlank()) {
+            String mapped = mapSuricataClassification(suricataClassification);
+            if (mapped != null) {
+                return mapped;
+            }
+        }
+
+        // 2. Fall through to signature-based categorization
+        return categorizeFromSignature(signature);
+    }
+
+    /**
+     * Map Suricata classification strings to specific, meaningful event type categories.
+     * Returns null for generic/vague classifications that should be resolved by signature.
+     */
+    private static String mapSuricataClassification(String classification) {
+        if (classification == null) return null;
+        String lower = classification.toLowerCase().trim();
+
+        // Specific, meaningful classifications
+        if (lower.contains("user privilege gain") || lower.contains("admin privilege gain")) {
+            return "attempted_privilege_gain";
+        } else if (lower.contains("administrator privilege")) {
+            return "attempted_admin_privilege_gain";
+        } else if (lower.contains("network trojan")) {
+            return "network_trojan_detected";
+        } else if (lower.contains("web application attack")) {
+            return "web_application_attack";
+        } else if (lower.contains("attempted denial of service")) {
+            return "denial_of_service";
+        } else if (lower.contains("successful user privilege gain")) {
+            return "successful_privilege_gain";
+        } else if (lower.contains("successful admin")) {
+            return "successful_admin_privilege_gain";
+        } else if (lower.contains("trojan activity") || lower.contains("a]trojan")) {
+            return "malware";
+        } else if (lower.contains("exploit kit")) {
+            return "exploit";
+        } else if (lower.contains("attempted information leak") || lower.contains("information leak")) {
+            return "information_leak";
+        } else if (lower.contains("policy violation")) {
+            return "policy_violation";
+        }
+
+        // Generic / vague classifications → return null to fall through to signature-based
+        if (lower.contains("potentially bad traffic")
+                || lower.contains("misc activity")
+                || lower.contains("misc attack")
+                || lower.contains("not suspicious")
+                || lower.contains("unknown")) {
+            return null; // let categorizeFromSignature() handle it
+        }
+
+        // Default: normalize the classification as-is for any unmapped specific ones
+        return classification.toLowerCase().replace(" ", "_");
+    }
+
     private static String categorizeFromSignature(String signature) {
         if (signature == null)
             return "unknown";
@@ -498,6 +558,16 @@ public class SuricataModule {
             return "icmp_flood";
         } else if (lower.contains("arp") && (lower.contains("spoof") || lower.contains("poison"))) {
             return "arp_spoofing";
+        }
+
+        // Lateral movement detection (SMB-based tools and techniques)
+        if (lower.contains("lateral movement") || lower.contains("lateral_movement")
+                || (lower.contains("smb") && (lower.contains("wmi") || lower.contains("wmic")
+                        || lower.contains("rundll") || lower.contains("psexec")
+                        || lower.contains("ipconfig") || lower.contains(".mof")
+                        || lower.contains("mof ") || lower.contains("managed object"))))
+        {
+            return "lateral_movement";
         }
 
         if (lower.contains("wannacry") || lower.contains("eternalblue") || lower.contains("ms17-010")
@@ -561,7 +631,8 @@ public class SuricataModule {
         }
 
         // Adjust based on category
-        if (category.contains("apt") || category.contains("ransomware")) {
+        if (category.contains("apt") || category.contains("ransomware")
+                || category.contains("lateral_movement") || category.contains("privilege_gain")) {
             baseScore += 10;
         } else if (category.contains("malware") || category.contains("trojan")) {
             baseScore += 5;
