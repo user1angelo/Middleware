@@ -1,0 +1,52 @@
+name: "SDN Detect Protocol Anomalies"
+version: 1.0
+description: >
+  Detects network protocol anomalies from Suricata such as SMB file overlaps and unknown Ethertypes.
+  These events often indicate evasion techniques, malformed packets, or exploitation attempts against SMB.
+  Triggers immediate network isolation via OpenDaylight and alerts the SOC.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  # Match either of the specific signatures seen in the telemetry
+  condition: "{{ trigger.payload.signature contains 'SMB file overlap' or trigger.payload.signature contains 'Ethertype unknown' }}"
+
+steps:
+  - name: "Log Protocol Anomaly Event"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "ANOMALY_DETECTED"
+        data:
+          event_id: "{{ trigger.event_id }}"
+          source_ip: "{{ trigger.payload.source_ip }}"
+          severity: "{{ trigger.payload.severity }}"
+          alert_type: "Anomaly.Protocol"
+          signature: "{{ trigger.payload.signature }}"
+          timestamp: "{{ trigger.timestamp }}"
+          
+  - name: "Initiate Host Network Isolation (ODL)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          sdn_controller: "opendaylight"
+          priority: "high"
+          justification: "Protocol anomaly detected ({{ trigger.payload.signature }}) from {{ trigger.payload.source_ip }}. Isolating host to prevent potential exploitation."
+          source_event_id: "{{ trigger.event_id }}"
+
+  - name: "Alert SOC"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SOC_ALERT"
+        data:
+          alert_level: "high"
+          incident_type: "network_protocol_anomaly"
+          affected_host: "{{ trigger.payload.source_ip }}"
+          severity: "high"
+          action_taken: "HOST_ISOLATED"
+          requires_investigation: true
+          message: "HIGH: Protocol anomaly ({{ trigger.payload.signature }}) detected involving {{ trigger.payload.source_ip }}. Automatically isolated via SDN."
