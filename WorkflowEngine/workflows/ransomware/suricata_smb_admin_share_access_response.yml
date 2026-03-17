@@ -1,0 +1,51 @@
+name: "Suricata SMB Admin Share Access Response"
+version: 1.0
+description: >
+  Detects suspicious SMB admin share access activity (e.g., C$ / ADMIN$ access)
+  from Suricata alerts and triggers immediate host isolation with SOC notification.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  condition: "{{ trigger.payload.alert_type contains 'smb_admin_share_access' and trigger.payload.threat_score >= 55 }}"
+
+steps:
+  - name: "Log SMB Admin Share Access Event"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "LATERAL_MOVEMENT_DETECTED"
+        data:
+          event_id: "{{ trigger.event_id }}"
+          source_ip: "{{ trigger.payload.source_ip }}"
+          destination_ip: "{{ trigger.payload.destination_ip }}"
+          severity: "{{ trigger.payload.severity }}"
+          alert_type: "{{ trigger.payload.alert_type }}"
+          signature: "{{ trigger.payload.signature }}"
+          timestamp: "{{ trigger.timestamp }}"
+
+  - name: "Initiate Host Network Isolation (ODL)"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          sdn_controller: "opendaylight"
+          priority: "high"
+          justification: "Suspicious SMB admin share access detected from {{ trigger.payload.source_ip }} ({{ trigger.payload.signature }}). Auto-isolating host to prevent lateral movement."
+          source_event_id: "{{ trigger.event_id }}"
+
+  - name: "Alert SOC"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SOC_ALERT"
+        data:
+          alert_level: "high"
+          incident_type: "smb_admin_share_access"
+          affected_host: "{{ trigger.payload.source_ip }}"
+          severity: "{{ trigger.payload.severity }}"
+          action_taken: "HOST_ISOLATED"
+          requires_investigation: true
+          message: "HIGH: SMB admin share access pattern detected from {{ trigger.payload.source_ip }}. Host was automatically isolated via SDN."

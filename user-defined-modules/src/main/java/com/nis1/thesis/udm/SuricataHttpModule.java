@@ -448,7 +448,8 @@ public class SuricataHttpModule implements PluggableModule {
         // If the signature strongly indicates ransomware (e.g., custom Ryuk rules),
         // prefer that over broad Suricata classifications like "network trojan".
         String signatureCategory = categorizeFromSignature(signature);
-        if ("ransomware".equals(signatureCategory)) {
+        if ("ransomware".equals(signatureCategory)
+            || "smb_admin_share_access".equals(signatureCategory)) {
             return signatureCategory;
         }
 

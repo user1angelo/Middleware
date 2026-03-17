@@ -488,10 +488,10 @@ public class SuricataModule {
      * to signature-based categorization for generic classifications.
      */
     private static String resolveCategory(String suricataClassification, String signature) {
-        // If the signature strongly indicates ransomware (e.g., custom Ryuk rules),
-        // prefer that over broad Suricata classifications like "network trojan".
+        // Prefer high-confidence signature categories over broad classifications.
         String signatureCategory = categorizeFromSignature(signature);
-        if ("ransomware".equals(signatureCategory)) {
+        if ("ransomware".equals(signatureCategory)
+                || "smb_admin_share_access".equals(signatureCategory)) {
             return signatureCategory;
         }
 
