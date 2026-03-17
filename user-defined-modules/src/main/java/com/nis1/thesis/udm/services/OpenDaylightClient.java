@@ -57,7 +57,6 @@ public class OpenDaylightClient {
     private final String baseUrl;
     private final String username;
     private final String password;
-    private final int quarantineTableId;
 
     // Default SDN settings
     private static final String DEFAULT_NODE = "openflow:1";
@@ -72,13 +71,12 @@ public class OpenDaylightClient {
     private final Map<String, String> targetIndex = new ConcurrentHashMap<>();
 
     public OpenDaylightClient(ModuleHelper helper, String moduleName, String baseUrl, String username,
-            String password, int quarantineTableId) {
+            String password) {
         this.helper = helper;
         this.moduleName = moduleName;
         this.baseUrl = baseUrl;
         this.username = username;
         this.password = password;
-        this.quarantineTableId = quarantineTableId >= 0 ? quarantineTableId : DEFAULT_TABLE;
     }
 
     public boolean isolateHost(String targetIp, String targetMac, String mitigationId, QuarantinePolicyOptions options) {
@@ -318,7 +316,7 @@ public class OpenDaylightClient {
     private Set<String> fetchConfiguredFlowIdsForNode(String nodeId) {
         Set<String> flowIds = new LinkedHashSet<>();
         String tableUrl = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d", baseUrl, nodeId,
-            quarantineTableId);
+                DEFAULT_TABLE);
 
         try {
             JSONObject response = fetchJson(tableUrl);
@@ -436,7 +434,7 @@ public class OpenDaylightClient {
 
     private int sendFlowRequest(String method, String nodeId, String flowId, String jsonBody) {
         String url = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d/flow/%s",
-            baseUrl, nodeId, quarantineTableId, flowId);
+                baseUrl, nodeId, DEFAULT_TABLE, flowId);
         return sendRestRequest(method, url, jsonBody);
     }
 
@@ -772,7 +770,7 @@ public class OpenDaylightClient {
     private String buildIsolationFlowJson(String flowId, String ipAddress, String macAddress, String token) {
         JSONObject flow = new JSONObject();
         flow.put("id", flowId);
-        flow.put("table_id", quarantineTableId);
+        flow.put("table_id", DEFAULT_TABLE);
         flow.put("priority", ISOLATION_PRIORITY);
         flow.put("match", buildMatch(ipAddress, macAddress, token));
         flow.put("instructions", buildDropInstruction());
