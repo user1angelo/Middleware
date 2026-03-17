@@ -132,6 +132,35 @@ public class WorkflowMatcher {
         }
         
         // Check severity
+        if (condition.contains("note_type") || condition.contains("noteType")) {
+            if (condition.contains("contains")) {
+                String expectedValue = extractValueFromCondition(condition, "note_type", "contains");
+                if (expectedValue == null) {
+                    expectedValue = extractValueFromCondition(condition, "noteType", "contains");
+                }
+
+                if (expectedValue != null) {
+                    String noteType = payload.optString("note_type", payload.optString("noteType", ""));
+                    if (!noteType.toLowerCase().contains(expectedValue.toLowerCase())) {
+                        return false;
+                    }
+                }
+            } else {
+                String expectedValue = extractValueFromCondition(condition, "note_type", "==");
+                if (expectedValue == null) {
+                    expectedValue = extractValueFromCondition(condition, "noteType", "==");
+                }
+
+                if (expectedValue != null) {
+                    String noteType = payload.optString("note_type", payload.optString("noteType", ""));
+                    if (!noteType.equalsIgnoreCase(expectedValue)) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // Check severity
         if (condition.contains("severity")) {
             String severity = extractValueFromCondition(condition, "severity", "==");
             if (severity != null) {
