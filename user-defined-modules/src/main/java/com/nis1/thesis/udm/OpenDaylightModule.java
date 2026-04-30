@@ -45,6 +45,7 @@ public class OpenDaylightModule implements PluggableModule {
     private String defaultPolicyMode = "strict_bi_directional";
     private boolean defaultContainArp = true;
     private boolean defaultContainDhcp = true;
+    private boolean suppressByIdOnly = true;
 
     private volatile boolean running = false;
 
@@ -62,7 +63,7 @@ public class OpenDaylightModule implements PluggableModule {
 
         // Initialize services
         this.scanner = new NetworkScannerService(helper, getName());
-        this.odlClient = new OpenDaylightClient(helper, getName(), odlBaseUrl, odlUsername, odlPassword);
+        this.odlClient = new OpenDaylightClient(helper, getName(), odlBaseUrl, odlUsername, odlPassword, suppressByIdOnly);
 
         this.running = true;
 
@@ -160,9 +161,15 @@ public class OpenDaylightModule implements PluggableModule {
                 helper.log(getName(), "INFO", "Rollback reason: " + rollbackReason);
             }
 
-            boolean success = odlClient.removeIsolation(targetHost, targetMac, mitigationId);
-            if (success) {
-                helper.log(getName(), "INFO", "Successfully removed isolation from host: " + targetHost);
+            OpenDaylightClient.RemoveIsolationResult result = odlClient.removeIsolationDetailed(targetHost, targetMac, mitigationId);
+            if (result.success) {
+                if (result.deletedHttp2xx > 0) {
+                    helper.log(getName(), "INFO", "Successfully removed isolation from host: " + targetHost);
+                } else {
+                    helper.log(getName(), "WARN", "REMOVE_MITIGATION for mitigation " + result.resolvedMitigationId
+                            + " target " + targetHost
+                            + ": no flows were found or deleted — isolation may not have been active");
+                }
             } else {
                 helper.log(getName(), "ERROR", "Failed to remove isolation from host: " + targetHost);
             }
@@ -243,13 +250,19 @@ public class OpenDaylightModule implements PluggableModule {
      */
     public boolean manualRemoveIsolation(String ipAddress) {
         helper.log(getName(), "INFO", "Remove isolation requested for: " + ipAddress);
-        boolean success = odlClient.removeIsolation(ipAddress, null, null);
-        if (success) {
-            helper.log(getName(), "INFO", "Isolation removed for: " + ipAddress);
+        OpenDaylightClient.RemoveIsolationResult result = odlClient.removeIsolationDetailed(ipAddress, null, null);
+        if (result.success) {
+            if (result.deletedHttp2xx > 0) {
+                helper.log(getName(), "INFO", "Isolation removed for: " + ipAddress);
+            } else {
+                helper.log(getName(), "WARN", "REMOVE_MITIGATION for mitigation " + result.resolvedMitigationId
+                        + " target " + ipAddress
+                        + ": no flows were found or deleted — isolation may not have been active");
+            }
         } else {
             helper.log(getName(), "ERROR", "Failed to remove isolation for: " + ipAddress);
         }
-        return success;
+        return result.success;
     }
 
     /**
@@ -465,6 +478,7 @@ public class OpenDaylightModule implements PluggableModule {
             defaultPolicyMode = props.getProperty("mitigation.policy.mode", defaultPolicyMode);
             defaultContainArp = Boolean.parseBoolean(props.getProperty("mitigation.containment.arp", String.valueOf(defaultContainArp)));
             defaultContainDhcp = Boolean.parseBoolean(props.getProperty("mitigation.containment.dhcp", String.valueOf(defaultContainDhcp)));
+            suppressByIdOnly = Boolean.parseBoolean(props.getProperty("odl.mitigation.suppress_by_id_only", String.valueOf(suppressByIdOnly)));
         } catch (IOException e) {
             System.out.println("[OpenDaylightModule] Using default config");
         }

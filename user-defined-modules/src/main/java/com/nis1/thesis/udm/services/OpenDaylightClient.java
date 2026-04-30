@@ -6,7 +6,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,6 +24,23 @@ import com.nis1.thesis.sdk.ModuleHelper;
  * Service for interacting with OpenDaylight RESTCONF API.
  */
 public class OpenDaylightClient {
+
+    public static class RemoveIsolationResult {
+        public final boolean success;
+        public final String resolvedMitigationId;
+        public final String targetKey;
+        public final int matchedFlows;
+        public final int deletedHttp2xx;
+
+        private RemoveIsolationResult(boolean success, String resolvedMitigationId, String targetKey, int matchedFlows,
+                int deletedHttp2xx) {
+            this.success = success;
+            this.resolvedMitigationId = resolvedMitigationId;
+            this.targetKey = targetKey;
+            this.matchedFlows = matchedFlows;
+            this.deletedHttp2xx = deletedHttp2xx;
+        }
+    }
 
     public static class QuarantinePolicyOptions {
         public String mode = "strict_bi_directional";
@@ -57,6 +76,7 @@ public class OpenDaylightClient {
     private final String baseUrl;
     private final String username;
     private final String password;
+    private final boolean suppressByIdOnly;
 
     // Default SDN settings
     private static final String DEFAULT_NODE = "openflow:1";
@@ -72,11 +92,17 @@ public class OpenDaylightClient {
 
     public OpenDaylightClient(ModuleHelper helper, String moduleName, String baseUrl, String username,
             String password) {
+        this(helper, moduleName, baseUrl, username, password, true);
+    }
+
+    public OpenDaylightClient(ModuleHelper helper, String moduleName, String baseUrl, String username,
+            String password, boolean suppressByIdOnly) {
         this.helper = helper;
         this.moduleName = moduleName;
         this.baseUrl = baseUrl;
         this.username = username;
         this.password = password;
+        this.suppressByIdOnly = suppressByIdOnly;
     }
 
     public boolean isolateHost(String targetIp, String targetMac, String mitigationId, QuarantinePolicyOptions options) {
@@ -87,27 +113,31 @@ public class OpenDaylightClient {
                 : "mit-" + System.currentTimeMillis();
         String targetKey = buildTargetKey(normalizedIp, normalizedMac);
 
-        MitigationRecord existingById = ownedMitigations.get(normalizedMitigationId);
-        if (existingById != null && !existingById.installedFlows.isEmpty()) {
-            helper.log(moduleName, "INFO", "Duplicate mitigation event ignored (already active): "
-                + normalizedMitigationId + " target=" + targetKey);
+        if (shouldSuppressDuplicateByMitigationId(normalizedMitigationId, targetKey)) {
             return true;
         }
 
-        String activeMitigationForTarget = targetIndex.get(targetKey);
-        if (activeMitigationForTarget != null && !activeMitigationForTarget.equals(normalizedMitigationId)) {
-            MitigationRecord activeRecord = ownedMitigations.get(activeMitigationForTarget);
-            if (activeRecord != null && !activeRecord.installedFlows.isEmpty()) {
-                helper.log(moduleName, "INFO", "Mitigation already active for target " + targetKey
-                    + " (active=" + activeMitigationForTarget + ", incoming=" + normalizedMitigationId
-                    + "); duplicate isolate request ignored");
-                return true;
-            }
+        if (!suppressByIdOnly) {
+            String activeMitigationForTarget = targetIndex.get(targetKey);
+            if (activeMitigationForTarget != null) {
+                if (activeMitigationForTarget.equals(normalizedMitigationId)) {
+                    helper.log(moduleName, "WARN", "Duplicate mitigation request suppressed (same mitigation_id already indexed): "
+                            + normalizedMitigationId + " target=" + targetKey);
+                    return true;
+                }
 
-            helper.log(moduleName, "WARN", "Target index was stale for " + targetKey
-                + " (mitigation=" + activeMitigationForTarget + "); continuing with fresh mitigation "
-                + normalizedMitigationId);
-            targetIndex.remove(targetKey, activeMitigationForTarget);
+                MitigationRecord activeRecord = ownedMitigations.get(activeMitigationForTarget);
+                if (activeRecord != null && !activeRecord.installedFlows.isEmpty()) {
+                    helper.log(moduleName, "WARN", "Target already has a different active mitigation (target=" + targetKey
+                            + ", active=" + activeMitigationForTarget + ", incoming=" + normalizedMitigationId
+                            + "); proceeding because suppression is mitigation-id based");
+                } else {
+                    helper.log(moduleName, "WARN", "Target index was stale for " + targetKey
+                            + " (mitigation=" + activeMitigationForTarget + "); continuing with fresh mitigation "
+                            + normalizedMitigationId);
+                    targetIndex.remove(targetKey, activeMitigationForTarget);
+                }
+            }
         }
 
         QuarantinePolicyOptions effectiveOptions = options != null ? options : new QuarantinePolicyOptions();
@@ -148,6 +178,10 @@ public class OpenDaylightClient {
     }
 
     public boolean removeIsolation(String targetIp, String targetMac, String mitigationId) {
+        return removeIsolationDetailed(targetIp, targetMac, mitigationId).success;
+    }
+
+    public RemoveIsolationResult removeIsolationDetailed(String targetIp, String targetMac, String mitigationId) {
         String normalizedIp = normalizeIp(targetIp);
         String normalizedMac = normalizeMac(targetMac);
         String targetKey = buildTargetKey(normalizedIp, normalizedMac);
@@ -169,47 +203,68 @@ public class OpenDaylightClient {
 
         if (resolvedMitigationId == null) {
             helper.log(moduleName, "WARN", "No owned mitigation record found for target " + targetKey);
-            return false;
+            return new RemoveIsolationResult(false, null, targetKey, 0, 0);
         }
 
         MitigationRecord record = ownedMitigations.get(resolvedMitigationId);
         if (record == null || record.installedFlows.isEmpty()) {
             helper.log(moduleName, "WARN", "No in-memory flow records found for mitigation " + resolvedMitigationId
                     + "; falling back to prefix-based cleanup");
-            boolean fallbackRemoved = removeOwnedFlowsByMitigationPrefix(resolvedMitigationId);
-            if (fallbackRemoved) {
+            PrefixCleanupResult cleanup = removeOwnedFlowsByMitigationPrefixDetailed(resolvedMitigationId);
+            if (cleanup.success) {
+                if (cleanup.matchedFlows == 0 && cleanup.deletedHttp2xx == 0) {
+                    helper.log(moduleName, "WARN", "REMOVE_MITIGATION for mitigation " + resolvedMitigationId
+                            + " target " + targetKey
+                            + ": no flows were found or deleted — isolation may not have been active");
+                }
+                bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
+                evictMitigationFromMemoryByPrefix(resolvedMitigationId);
                 targetIndex.remove(buildTargetKey(normalizedIp, normalizedMac));
-                ownedMitigations.remove(resolvedMitigationId);
             }
-            return fallbackRemoved;
+
+            return new RemoveIsolationResult(cleanup.success, resolvedMitigationId, targetKey,
+                    cleanup.matchedFlows, cleanup.deletedHttp2xx);
         }
 
         boolean allRemovedOrAbsent = true;
+        int deletedHttp2xx = 0;
+        int matchedFlows = 0;
         for (OwnedFlow flow : record.installedFlows) {
+            matchedFlows++;
             int responseCode = sendFlowRequestWithRetry("DELETE", flow.nodeId, flow.flowId, null);
+            if (responseCode >= 200 && responseCode < 300) {
+                deletedHttp2xx++;
+            }
             if (!((responseCode >= 200 && responseCode < 300) || responseCode == 404)) {
                 allRemovedOrAbsent = false;
             }
         }
 
         if (allRemovedOrAbsent) {
-            ownedMitigations.remove(resolvedMitigationId);
-            targetIndex.remove(buildTargetKey(record.targetIp, record.targetMac));
+            if (matchedFlows == 0 || deletedHttp2xx == 0) {
+                helper.log(moduleName, "WARN", "REMOVE_MITIGATION for mitigation " + resolvedMitigationId
+                        + " target " + targetKey
+                        + ": no flows were found or deleted — isolation may not have been active");
+            }
+            bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
+            evictMitigationFromMemory(resolvedMitigationId);
             helper.log(moduleName, "INFO", "Removed system-owned quarantine rules for mitigation " + resolvedMitigationId);
         } else {
             helper.log(moduleName, "WARN", "Some tracked flow deletions failed for mitigation " + resolvedMitigationId
                     + "; attempting prefix-based cleanup fallback");
-            boolean fallbackRemoved = removeOwnedFlowsByMitigationPrefix(resolvedMitigationId);
-            if (fallbackRemoved) {
-                ownedMitigations.remove(resolvedMitigationId);
-                targetIndex.remove(buildTargetKey(record.targetIp, record.targetMac));
+            PrefixCleanupResult cleanup = removeOwnedFlowsByMitigationPrefixDetailed(resolvedMitigationId);
+            deletedHttp2xx += cleanup.deletedHttp2xx;
+            matchedFlows += cleanup.matchedFlows;
+            if (cleanup.success) {
+                bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
+                evictMitigationFromMemoryByPrefix(resolvedMitigationId);
                 helper.log(moduleName, "INFO", "Fallback cleanup completed for mitigation " + resolvedMitigationId);
-                return true;
+                return new RemoveIsolationResult(true, resolvedMitigationId, targetKey, matchedFlows, deletedHttp2xx);
             }
             helper.log(moduleName, "ERROR", "Failed to remove some system-owned quarantine rules for mitigation " + resolvedMitigationId);
         }
 
-        return allRemovedOrAbsent;
+        return new RemoveIsolationResult(allRemovedOrAbsent, resolvedMitigationId, targetKey, matchedFlows, deletedHttp2xx);
     }
 
     public boolean applyProtocolDrop(String sourceIp, int ipProtocol, String mitigationId) {
@@ -224,24 +279,28 @@ public class OpenDaylightClient {
                 : "mit-" + System.currentTimeMillis();
         String targetKey = buildTargetKey(normalizedIp, null);
 
-        MitigationRecord existingById = ownedMitigations.get(normalizedMitigationId);
-        if (existingById != null && !existingById.installedFlows.isEmpty()) {
-            helper.log(moduleName, "INFO", "Duplicate mitigation event ignored (already active): "
-                + normalizedMitigationId + " target=" + targetKey);
+        if (shouldSuppressDuplicateByMitigationId(normalizedMitigationId, targetKey)) {
             return true;
         }
 
-        String activeMitigationForTarget = targetIndex.get(targetKey);
-        if (activeMitigationForTarget != null && !activeMitigationForTarget.equals(normalizedMitigationId)) {
-            MitigationRecord activeRecord = ownedMitigations.get(activeMitigationForTarget);
-            if (activeRecord != null && !activeRecord.installedFlows.isEmpty()) {
-                helper.log(moduleName, "INFO", "Mitigation already active for target " + targetKey
-                    + " (active=" + activeMitigationForTarget + ", incoming=" + normalizedMitigationId
-                    + "); duplicate protocol drop request ignored");
-                return true;
-            }
+        if (!suppressByIdOnly) {
+            String activeMitigationForTarget = targetIndex.get(targetKey);
+            if (activeMitigationForTarget != null) {
+                if (activeMitigationForTarget.equals(normalizedMitigationId)) {
+                    helper.log(moduleName, "WARN", "Duplicate mitigation request suppressed (same mitigation_id already indexed): "
+                            + normalizedMitigationId + " target=" + targetKey);
+                    return true;
+                }
 
-            targetIndex.remove(targetKey, activeMitigationForTarget);
+                MitigationRecord activeRecord = ownedMitigations.get(activeMitigationForTarget);
+                if (activeRecord != null && !activeRecord.installedFlows.isEmpty()) {
+                    helper.log(moduleName, "WARN", "Target already has a different active mitigation (target=" + targetKey
+                            + ", active=" + activeMitigationForTarget + ", incoming=" + normalizedMitigationId
+                            + "); proceeding because suppression is mitigation-id based");
+                } else {
+                    targetIndex.remove(targetKey, activeMitigationForTarget);
+                }
+            }
         }
 
         Set<String> candidateNodes = resolveCandidateNodesForTarget(normalizedIp, null);
@@ -273,7 +332,36 @@ public class OpenDaylightClient {
         return true;
     }
 
-    private boolean removeOwnedFlowsByMitigationPrefix(String mitigationId) {
+    private boolean shouldSuppressDuplicateByMitigationId(String mitigationId, String targetKey) {
+        MitigationRecord existingById = ownedMitigations.get(mitigationId);
+        if (existingById != null && !existingById.installedFlows.isEmpty()) {
+            helper.log(moduleName, "WARN", "Duplicate mitigation request suppressed (already active): "
+                    + mitigationId + " target=" + targetKey);
+            return true;
+        }
+
+        if (hasConfiguredFlowsForMitigationPrefix(mitigationId)) {
+            helper.log(moduleName, "WARN", "Duplicate mitigation request suppressed (ODL still reports sysq_ flows for mitigation_id): "
+                    + mitigationId + " target=" + targetKey);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static class PrefixCleanupResult {
+        private final boolean success;
+        private final int matchedFlows;
+        private final int deletedHttp2xx;
+
+        private PrefixCleanupResult(boolean success, int matchedFlows, int deletedHttp2xx) {
+            this.success = success;
+            this.matchedFlows = matchedFlows;
+            this.deletedHttp2xx = deletedHttp2xx;
+        }
+    }
+
+    private PrefixCleanupResult removeOwnedFlowsByMitigationPrefixDetailed(String mitigationId) {
         String mitigationPrefix = SYSTEM_FLOW_PREFIX + "_" + sanitize(mitigationId) + "_";
         Set<String> nodes = fetchAllOpenFlowNodes();
         if (nodes.isEmpty()) {
@@ -282,6 +370,7 @@ public class OpenDaylightClient {
 
         int deletionFailures = 0;
         int matchedFlows = 0;
+        int deletedHttp2xx = 0;
 
         for (String nodeId : nodes) {
             Set<String> flowIds = fetchConfiguredFlowIdsForNode(nodeId);
@@ -292,6 +381,9 @@ public class OpenDaylightClient {
 
                 matchedFlows++;
                 int responseCode = sendFlowRequestWithRetry("DELETE", nodeId, flowId, null);
+                if (responseCode >= 200 && responseCode < 300) {
+                    deletedHttp2xx++;
+                }
                 if (!((responseCode >= 200 && responseCode < 300) || responseCode == 404)) {
                     deletionFailures++;
                 }
@@ -299,18 +391,111 @@ public class OpenDaylightClient {
         }
 
         if (matchedFlows == 0) {
-            helper.log(moduleName, "INFO", "No configured flows matched mitigation prefix " + mitigationPrefix
+            helper.log(moduleName, "WARN", "REMOVE_MITIGATION for mitigation " + mitigationId
+                    + ": no configured flows matched mitigation prefix " + mitigationPrefix
                     + " (already removed or never installed)");
-            return true;
+            return new PrefixCleanupResult(true, 0, 0);
         }
 
         if (deletionFailures > 0) {
             helper.log(moduleName, "ERROR", "Prefix cleanup failed for " + deletionFailures + " flow(s) under " + mitigationPrefix);
-            return false;
+            return new PrefixCleanupResult(false, matchedFlows, deletedHttp2xx);
         }
 
         helper.log(moduleName, "INFO", "Prefix cleanup removed " + matchedFlows + " flow(s) under " + mitigationPrefix);
-        return true;
+        return new PrefixCleanupResult(true, matchedFlows, deletedHttp2xx);
+    }
+
+    private boolean hasConfiguredFlowsForMitigationPrefix(String mitigationId) {
+        String mitigationPrefix = SYSTEM_FLOW_PREFIX + "_" + sanitize(mitigationId) + "_";
+        Set<String> nodes = fetchAllOpenFlowNodes();
+        if (nodes.isEmpty()) {
+            nodes.add(DEFAULT_NODE);
+        }
+
+        for (String nodeId : nodes) {
+            Set<String> flowIds = fetchConfiguredFlowIdsForNodeBestEffort(nodeId);
+            for (String flowId : flowIds) {
+                if (flowId.startsWith(mitigationPrefix)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void bestEffortVerifyFlowsClearedBeforeEvict(String mitigationId) {
+        try {
+            String mitigationPrefix = SYSTEM_FLOW_PREFIX + "_" + sanitize(mitigationId) + "_";
+            Set<String> nodes = fetchAllOpenFlowNodes();
+            if (nodes.isEmpty()) {
+                nodes.add(DEFAULT_NODE);
+            }
+
+            int remaining = 0;
+            for (String nodeId : nodes) {
+                Set<String> flowIds = fetchConfiguredFlowIdsForNodeBestEffort(nodeId);
+                for (String flowId : flowIds) {
+                    if (flowId.startsWith(mitigationPrefix)) {
+                        remaining++;
+                    }
+                }
+            }
+
+            if (remaining > 0) {
+                helper.log(moduleName, "DEBUG", "Post-delete verification: ODL still reports " + remaining
+                        + " flow(s) under prefix " + mitigationPrefix
+                        + " after REMOVE_MITIGATION; proceeding with in-memory eviction anyway");
+            }
+        } catch (Exception e) {
+            helper.log(moduleName, "DEBUG", "Post-delete verification query failed for mitigation " + mitigationId
+                    + ": " + e.getMessage());
+        }
+    }
+
+    private void evictMitigationFromMemory(String mitigationId) {
+        MitigationRecord record = ownedMitigations.remove(mitigationId);
+        if (record != null) {
+            targetIndex.remove(buildTargetKey(record.targetIp, record.targetMac), mitigationId);
+        }
+
+        // Also remove any target index entries pointing to this mitigation (defensive).
+        for (Map.Entry<String, String> entry : targetIndex.entrySet()) {
+            if (mitigationId.equals(entry.getValue())) {
+                targetIndex.remove(entry.getKey(), mitigationId);
+            }
+        }
+    }
+
+    private void evictMitigationFromMemoryByPrefix(String mitigationId) {
+        String sanitized = sanitize(mitigationId);
+        List<String> toRemove = new ArrayList<>();
+        for (Map.Entry<String, MitigationRecord> entry : ownedMitigations.entrySet()) {
+            MitigationRecord record = entry.getValue();
+            if (record == null) {
+                continue;
+            }
+            if (sanitize(record.mitigationId).equals(sanitized)) {
+                toRemove.add(entry.getKey());
+                continue;
+            }
+
+            String mitigationPrefix = SYSTEM_FLOW_PREFIX + "_" + sanitized + "_";
+            for (OwnedFlow flow : record.installedFlows) {
+                if (flow.flowId != null && flow.flowId.startsWith(mitigationPrefix)) {
+                    toRemove.add(entry.getKey());
+                    break;
+                }
+            }
+        }
+
+        for (String id : toRemove) {
+            evictMitigationFromMemory(id);
+        }
+
+        // Ensure the explicit key is evicted too.
+        evictMitigationFromMemory(mitigationId);
     }
 
     private Set<String> fetchConfiguredFlowIdsForNode(String nodeId) {
@@ -364,6 +549,57 @@ public class OpenDaylightClient {
         return flowIds;
     }
 
+    private Set<String> fetchConfiguredFlowIdsForNodeBestEffort(String nodeId) {
+        Set<String> flowIds = new LinkedHashSet<>();
+        String tableUrl = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d", baseUrl, nodeId,
+                DEFAULT_TABLE);
+
+        try {
+            JSONObject response = fetchJsonBestEffort(tableUrl);
+            if (response == null) {
+                return flowIds;
+            }
+
+            JSONArray tables = response.optJSONArray("table");
+            if (tables == null) {
+                tables = response.optJSONArray("flow-node-inventory:table");
+            }
+
+            if (tables != null) {
+                for (int i = 0; i < tables.length(); i++) {
+                    JSONObject table = tables.optJSONObject(i);
+                    if (table == null) {
+                        continue;
+                    }
+
+                    JSONArray flows = table.optJSONArray("flow");
+                    if (flows == null) {
+                        flows = table.optJSONArray("flow-node-inventory:flow");
+                    }
+
+                    if (flows == null) {
+                        continue;
+                    }
+
+                    for (int j = 0; j < flows.length(); j++) {
+                        JSONObject flow = flows.optJSONObject(j);
+                        if (flow == null) {
+                            continue;
+                        }
+                        String id = flow.optString("id", "");
+                        if (!id.isBlank()) {
+                            flowIds.add(id);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            helper.log(moduleName, "DEBUG", "Best-effort flow query failed for node " + nodeId + ": " + e.getMessage());
+        }
+
+        return flowIds;
+    }
+
     private JSONObject fetchJson(String urlStr) {
         try {
             URL url = new URL(urlStr);
@@ -386,6 +622,32 @@ public class OpenDaylightClient {
             }
         } catch (Exception e) {
             helper.log(moduleName, "WARN", "GET JSON request failed for " + urlStr + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private JSONObject fetchJsonBestEffort(String urlStr) {
+        try {
+            URL url = new URL(urlStr);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+
+            String auth = username + ":" + password;
+            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+            conn.setRequestProperty("Authorization", "Basic " + encodedAuth);
+            conn.setRequestProperty("Accept", "application/json");
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode < 200 || responseCode >= 300) {
+                return null;
+            }
+
+            try (InputStream input = conn.getInputStream()) {
+                String body = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                return new JSONObject(body);
+            }
+        } catch (Exception e) {
+            helper.log(moduleName, "DEBUG", "Best-effort GET JSON request failed for " + urlStr + ": " + e.getMessage());
             return null;
         }
     }
