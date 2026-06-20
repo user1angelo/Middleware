@@ -2,9 +2,13 @@ package com.nis1.thesis.udm.services;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -71,6 +75,16 @@ public class OpenDaylightClient {
         }
     }
 
+    private static class FlowEntry {
+        private final String flowId;
+        private final JSONObject match;
+
+        private FlowEntry(String flowId, JSONObject match) {
+            this.flowId = flowId;
+            this.match = match;
+        }
+    }
+
     private final ModuleHelper helper;
     private final String moduleName;
     private final String baseUrl;
@@ -86,6 +100,7 @@ public class OpenDaylightClient {
     private static final int FLOW_REQUEST_MAX_RETRIES = 3;
     private static final long FLOW_REQUEST_BACKOFF_BASE_MS = 300L;
     private static final Pattern IPV4_PATTERN = Pattern.compile("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b");
+    private static final String PERSIST_FILE = "/tmp/middleware_odl_mitigations.json";
 
     private final Map<String, MitigationRecord> ownedMitigations = new ConcurrentHashMap<>();
     private final Map<String, String> targetIndex = new ConcurrentHashMap<>();
@@ -128,15 +143,28 @@ public class OpenDaylightClient {
 
                 MitigationRecord activeRecord = ownedMitigations.get(activeMitigationForTarget);
                 if (activeRecord != null && !activeRecord.installedFlows.isEmpty()) {
-                    helper.log(moduleName, "WARN", "Target already has a different active mitigation (target=" + targetKey
+                    helper.log(moduleName, "WARN", "Target already has an active mitigation with different ID (target=" + targetKey
                             + ", active=" + activeMitigationForTarget + ", incoming=" + normalizedMitigationId
-                            + "); proceeding because suppression is mitigation-id based");
+                            + "); removing old flows before installing new mitigation");
+                    removeIsolationDetailed(normalizedIp, normalizedMac, activeMitigationForTarget);
                 } else {
                     helper.log(moduleName, "WARN", "Target index was stale for " + targetKey
                             + " (mitigation=" + activeMitigationForTarget + "); continuing with fresh mitigation "
                             + normalizedMitigationId);
                     targetIndex.remove(targetKey, activeMitigationForTarget);
                 }
+            }
+        }
+
+        // Proactive cleanup: when in-memory state was lost (e.g. module restart),
+        // scan ODL for orphaned sysq_ flows targeting this host before installing
+        // new ones. This prevents stale flow accumulation across restarts.
+        if (!suppressByIdOnly && targetIndex.get(targetKey) == null) {
+            PrefixCleanupResult preCleanup = removeFlowsByTargetScan(normalizedIp, normalizedMac);
+            if (preCleanup.matchedFlows > 0) {
+                helper.log(moduleName, "INFO", "Pre-install target scan removed " + preCleanup.matchedFlows
+                        + " orphaned sysq_ flow(s) for target " + targetKey
+                        + " (likely from a prior module restart)");
             }
         }
 
@@ -171,6 +199,8 @@ public class OpenDaylightClient {
         ownedMitigations.put(normalizedMitigationId, record);
         targetIndex.put(targetKey, normalizedMitigationId);
 
+        persistState();
+
         helper.log(moduleName, "INFO", "Quarantine drop rules applied: " + installedCount
                 + " (mitigation_id=" + normalizedMitigationId + ", mode=" + effectiveOptions.mode
                 + ", arp=" + effectiveOptions.containArp + ", dhcp=" + effectiveOptions.containDhcp + ")");
@@ -202,8 +232,15 @@ public class OpenDaylightClient {
         }
 
         if (resolvedMitigationId == null) {
-            helper.log(moduleName, "WARN", "No owned mitigation record found for target " + targetKey);
-            return new RemoveIsolationResult(false, null, targetKey, 0, 0);
+            helper.log(moduleName, "WARN", "No owned mitigation record found for target " + targetKey
+                    + "; performing target-based scan for orphaned sysq_ flows");
+            PrefixCleanupResult cleanup = removeFlowsByTargetScan(normalizedIp, normalizedMac);
+            if (cleanup.success) {
+                evictTargetFromMemory(normalizedIp, normalizedMac);
+                persistState();
+            }
+            return new RemoveIsolationResult(cleanup.success, null, targetKey,
+                    cleanup.matchedFlows, cleanup.deletedHttp2xx);
         }
 
         MitigationRecord record = ownedMitigations.get(resolvedMitigationId);
@@ -211,15 +248,16 @@ public class OpenDaylightClient {
             helper.log(moduleName, "WARN", "No in-memory flow records found for mitigation " + resolvedMitigationId
                     + "; falling back to prefix-based cleanup");
             PrefixCleanupResult cleanup = removeOwnedFlowsByMitigationPrefixDetailed(resolvedMitigationId);
+            if (cleanup.matchedFlows == 0 && cleanup.deletedHttp2xx == 0) {
+                helper.log(moduleName, "WARN", "Prefix cleanup found no flows for mitigation " + resolvedMitigationId
+                        + "; falling back to target-based scan for " + targetKey);
+                cleanup = removeFlowsByTargetScan(normalizedIp, normalizedMac);
+            }
             if (cleanup.success) {
-                if (cleanup.matchedFlows == 0 && cleanup.deletedHttp2xx == 0) {
-                    helper.log(moduleName, "WARN", "REMOVE_MITIGATION for mitigation " + resolvedMitigationId
-                            + " target " + targetKey
-                            + ": no flows were found or deleted — isolation may not have been active");
-                }
                 bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
                 evictMitigationFromMemoryByPrefix(resolvedMitigationId);
-                targetIndex.remove(buildTargetKey(normalizedIp, normalizedMac));
+                evictTargetFromMemory(normalizedIp, normalizedMac);
+                persistState();
             }
 
             return new RemoveIsolationResult(cleanup.success, resolvedMitigationId, targetKey,
@@ -248,6 +286,7 @@ public class OpenDaylightClient {
             }
             bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
             evictMitigationFromMemory(resolvedMitigationId);
+            persistState();
             helper.log(moduleName, "INFO", "Removed system-owned quarantine rules for mitigation " + resolvedMitigationId);
         } else {
             helper.log(moduleName, "WARN", "Some tracked flow deletions failed for mitigation " + resolvedMitigationId
@@ -258,6 +297,7 @@ public class OpenDaylightClient {
             if (cleanup.success) {
                 bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
                 evictMitigationFromMemoryByPrefix(resolvedMitigationId);
+                persistState();
                 helper.log(moduleName, "INFO", "Fallback cleanup completed for mitigation " + resolvedMitigationId);
                 return new RemoveIsolationResult(true, resolvedMitigationId, targetKey, matchedFlows, deletedHttp2xx);
             }
@@ -294,9 +334,10 @@ public class OpenDaylightClient {
 
                 MitigationRecord activeRecord = ownedMitigations.get(activeMitigationForTarget);
                 if (activeRecord != null && !activeRecord.installedFlows.isEmpty()) {
-                    helper.log(moduleName, "WARN", "Target already has a different active mitigation (target=" + targetKey
+                    helper.log(moduleName, "WARN", "Target already has an active mitigation with different ID (target=" + targetKey
                             + ", active=" + activeMitigationForTarget + ", incoming=" + normalizedMitigationId
-                            + "); proceeding because suppression is mitigation-id based");
+                            + "); removing old flows before installing new protocol drop");
+                    removeIsolationDetailed(normalizedIp, null, activeMitigationForTarget);
                 } else {
                     targetIndex.remove(targetKey, activeMitigationForTarget);
                 }
@@ -325,6 +366,8 @@ public class OpenDaylightClient {
 
         ownedMitigations.put(normalizedMitigationId, record);
         targetIndex.put(targetKey, normalizedMitigationId);
+
+        persistState();
 
         helper.log(moduleName, "INFO", "Protocol drop rules applied: " + installedCount
                 + " (mitigation_id=" + normalizedMitigationId + ", ip=" + normalizedIp
@@ -403,6 +446,59 @@ public class OpenDaylightClient {
         }
 
         helper.log(moduleName, "INFO", "Prefix cleanup removed " + matchedFlows + " flow(s) under " + mitigationPrefix);
+        return new PrefixCleanupResult(true, matchedFlows, deletedHttp2xx);
+    }
+
+    private PrefixCleanupResult removeFlowsByTargetScan(String targetIp, String targetMac) {
+        String normalizedIp = normalizeIp(targetIp);
+        String normalizedMac = normalizeMac(targetMac);
+
+        if (normalizedIp == null && normalizedMac == null) {
+            helper.log(moduleName, "WARN", "Target scan requires at least IP or MAC");
+            return new PrefixCleanupResult(false, 0, 0);
+        }
+
+        Set<String> nodes = fetchAllOpenFlowNodes();
+        if (nodes.isEmpty()) {
+            nodes.add(DEFAULT_NODE);
+        }
+
+        int matchedFlows = 0;
+        int deletedHttp2xx = 0;
+        int deletionFailures = 0;
+
+        for (String nodeId : nodes) {
+            List<FlowEntry> sysqFlows = fetchSysqFlowsWithMatch(nodeId);
+            for (FlowEntry entry : sysqFlows) {
+                if (!flowMatchesTarget(entry.match, normalizedIp, normalizedMac)) {
+                    continue;
+                }
+
+                matchedFlows++;
+                int responseCode = sendFlowRequestWithRetry("DELETE", nodeId, entry.flowId, null);
+                if (responseCode >= 200 && responseCode < 300) {
+                    deletedHttp2xx++;
+                }
+                if (!((responseCode >= 200 && responseCode < 300) || responseCode == 404)) {
+                    deletionFailures++;
+                }
+            }
+        }
+
+        if (matchedFlows == 0) {
+            helper.log(moduleName, "DEBUG", "Target scan: no sysq_ flows found matching target "
+                    + buildTargetKey(normalizedIp, normalizedMac));
+            return new PrefixCleanupResult(true, 0, 0);
+        }
+
+        if (deletionFailures > 0) {
+            helper.log(moduleName, "ERROR", "Target scan: failed to delete " + deletionFailures
+                    + " flow(s) for target " + buildTargetKey(normalizedIp, normalizedMac));
+            return new PrefixCleanupResult(false, matchedFlows, deletedHttp2xx);
+        }
+
+        helper.log(moduleName, "INFO", "Target scan removed " + matchedFlows
+                + " sysq_ flow(s) for target " + buildTargetKey(normalizedIp, normalizedMac));
         return new PrefixCleanupResult(true, matchedFlows, deletedHttp2xx);
     }
 
@@ -496,6 +592,31 @@ public class OpenDaylightClient {
 
         // Ensure the explicit key is evicted too.
         evictMitigationFromMemory(mitigationId);
+    }
+
+    private void evictTargetFromMemory(String normalizedIp, String normalizedMac) {
+        String targetKey = buildTargetKey(normalizedIp, normalizedMac);
+        String existingId = targetIndex.remove(targetKey);
+        if (existingId != null) {
+            ownedMitigations.remove(existingId);
+        }
+
+        // Defensive: remove any records keyed by this target even if the
+        // mitigation ID differs.
+        List<String> toRemove = new ArrayList<>();
+        for (Map.Entry<String, MitigationRecord> entry : ownedMitigations.entrySet()) {
+            MitigationRecord record = entry.getValue();
+            if (record != null) {
+                String recordKey = buildTargetKey(record.targetIp, record.targetMac);
+                if (recordKey.equals(targetKey)) {
+                    toRemove.add(entry.getKey());
+                }
+            }
+        }
+
+        for (String id : toRemove) {
+            ownedMitigations.remove(id);
+        }
     }
 
     private Set<String> fetchConfiguredFlowIdsForNode(String nodeId) {
@@ -598,6 +719,124 @@ public class OpenDaylightClient {
         }
 
         return flowIds;
+    }
+
+    private List<FlowEntry> fetchSysqFlowsWithMatch(String nodeId) {
+        List<FlowEntry> entries = new ArrayList<>();
+        String tableUrl = String.format("%s/restconf/config/opendaylight-inventory:nodes/node/%s/table/%d",
+                baseUrl, nodeId, DEFAULT_TABLE);
+
+        try {
+            JSONObject response = fetchJson(tableUrl);
+            if (response == null) {
+                return entries;
+            }
+
+            JSONArray tables = response.optJSONArray("table");
+            if (tables == null) {
+                tables = response.optJSONArray("flow-node-inventory:table");
+            }
+
+            if (tables != null) {
+                for (int i = 0; i < tables.length(); i++) {
+                    JSONObject table = tables.optJSONObject(i);
+                    if (table == null) {
+                        continue;
+                    }
+
+                    JSONArray flows = table.optJSONArray("flow");
+                    if (flows == null) {
+                        flows = table.optJSONArray("flow-node-inventory:flow");
+                    }
+                    if (flows == null) {
+                        continue;
+                    }
+
+                    for (int j = 0; j < flows.length(); j++) {
+                        JSONObject flow = flows.optJSONObject(j);
+                        if (flow == null) {
+                            continue;
+                        }
+
+                        String id = flow.optString("id", "");
+                        if (!id.startsWith(SYSTEM_FLOW_PREFIX + "_")) {
+                            continue;
+                        }
+
+                        JSONObject match = flow.optJSONObject("match");
+                        if (match != null) {
+                            entries.add(new FlowEntry(id, match));
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            helper.log(moduleName, "WARN", "Failed to fetch sysq_ flows for node " + nodeId + ": " + e.getMessage());
+        }
+
+        return entries;
+    }
+
+    private boolean flowMatchesTarget(JSONObject match, String targetIp, String targetMac) {
+        if (match == null) {
+            return false;
+        }
+
+        if (targetIp != null) {
+            String ipSrc = extractIpFromMatch(match, "ipv4-source");
+            if (targetIp.equals(ipSrc)) {
+                return true;
+            }
+
+            String ipDst = extractIpFromMatch(match, "ipv4-destination");
+            if (targetIp.equals(ipDst)) {
+                return true;
+            }
+
+            String arpSpa = match.optString("arp-source-transport-address", "");
+            if (arpSpa.startsWith(targetIp + "/") || arpSpa.equals(targetIp)) {
+                return true;
+            }
+
+            String arpTpa = match.optString("arp-target-transport-address", "");
+            if (arpTpa.startsWith(targetIp + "/") || arpTpa.equals(targetIp)) {
+                return true;
+            }
+        }
+
+        if (targetMac != null) {
+            JSONObject ethMatch = match.optJSONObject("ethernet-match");
+            if (ethMatch != null) {
+                String srcMac = extractMacFromEthernetMatch(ethMatch, "ethernet-source");
+                if (targetMac.equalsIgnoreCase(srcMac)) {
+                    return true;
+                }
+
+                String dstMac = extractMacFromEthernetMatch(ethMatch, "ethernet-destination");
+                if (targetMac.equalsIgnoreCase(dstMac)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private String extractIpFromMatch(JSONObject match, String key) {
+        String value = match.optString(key, "");
+        if (value.isBlank()) {
+            return null;
+        }
+        int slashIdx = value.indexOf('/');
+        return slashIdx >= 0 ? value.substring(0, slashIdx) : value;
+    }
+
+    private String extractMacFromEthernetMatch(JSONObject ethMatch, String key) {
+        JSONObject field = ethMatch.optJSONObject(key);
+        if (field == null) {
+            return null;
+        }
+        return field.optString("address", null);
     }
 
     private JSONObject fetchJson(String urlStr) {
@@ -1170,5 +1409,138 @@ public class OpenDaylightClient {
         address.put("address", macAddress);
         ethernetMatch.put(field, address);
         return ethernetMatch;
+    }
+
+    // -------------------------------------------------------------------------
+    // Mitigation state persistence
+    // -------------------------------------------------------------------------
+
+    private void persistState() {
+        Path path = Paths.get(PERSIST_FILE);
+        JSONObject root = new JSONObject();
+        root.put("version", 1);
+
+        JSONObject mitigations = new JSONObject();
+        for (Map.Entry<String, MitigationRecord> entry : ownedMitigations.entrySet()) {
+            MitigationRecord record = entry.getValue();
+            if (record == null || record.installedFlows.isEmpty()) {
+                continue;
+            }
+
+            JSONObject recJson = new JSONObject();
+            recJson.put("mitigationId", record.mitigationId);
+            recJson.put("targetIp", record.targetIp != null ? record.targetIp : "");
+            recJson.put("targetMac", record.targetMac != null ? record.targetMac : "");
+
+            JSONArray flowsArray = new JSONArray();
+            for (OwnedFlow flow : record.installedFlows) {
+                JSONObject flowJson = new JSONObject();
+                flowJson.put("nodeId", flow.nodeId);
+                flowJson.put("flowId", flow.flowId);
+                flowsArray.put(flowJson);
+            }
+            recJson.put("installedFlows", flowsArray);
+            mitigations.put(entry.getKey(), recJson);
+        }
+        root.put("ownedMitigations", mitigations);
+
+        JSONObject indexes = new JSONObject();
+        for (Map.Entry<String, String> entry : targetIndex.entrySet()) {
+            if (entry.getKey() != null && entry.getValue() != null) {
+                indexes.put(entry.getKey(), entry.getValue());
+            }
+        }
+        root.put("targetIndex", indexes);
+
+        try {
+            Files.writeString(path, root.toString(2), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            helper.log(moduleName, "WARN", "Failed to persist ODL mitigation state: " + e.getMessage());
+        }
+    }
+
+    void loadPersistedState() {
+        Path path = Paths.get(PERSIST_FILE);
+        if (!Files.exists(path)) {
+            return;
+        }
+
+        try {
+            String content = Files.readString(path, StandardCharsets.UTF_8);
+            JSONObject root = new JSONObject(content);
+
+            JSONObject mitigations = root.optJSONObject("ownedMitigations");
+            if (mitigations != null) {
+                for (String key : mitigations.keySet()) {
+                    JSONObject recJson = mitigations.optJSONObject(key);
+                    if (recJson == null) {
+                        continue;
+                    }
+
+                    String mitigationId = recJson.optString("mitigationId", key);
+                    String targetIp = recJson.optString("targetIp", "");
+                    String targetMac = recJson.optString("targetMac", "");
+                    if (targetIp.isEmpty()) {
+                        targetIp = null;
+                    }
+                    if (targetMac.isEmpty()) {
+                        targetMac = null;
+                    }
+
+                    MitigationRecord record = new MitigationRecord(mitigationId, targetIp, targetMac);
+                    JSONArray flowsArray = recJson.optJSONArray("installedFlows");
+                    if (flowsArray != null) {
+                        for (int i = 0; i < flowsArray.length(); i++) {
+                            JSONObject flowJson = flowsArray.optJSONObject(i);
+                            if (flowJson == null) {
+                                continue;
+                            }
+                            String nodeId = flowJson.optString("nodeId", "");
+                            String flowId = flowJson.optString("flowId", "");
+                            if (!nodeId.isBlank() && !flowId.isBlank()) {
+                                record.installedFlows.add(new OwnedFlow(nodeId, flowId));
+                            }
+                        }
+                    }
+
+                    if (!record.installedFlows.isEmpty()) {
+                        // Verify flows still exist on ODL; if any survived a
+                        // restart we restore the record, otherwise discard.
+                        boolean atLeastOneExists = false;
+                        for (OwnedFlow flow : record.installedFlows) {
+                            int code = sendFlowRequest("GET", flow.nodeId, flow.flowId, null);
+                            if (code >= 200 && code < 300) {
+                                atLeastOneExists = true;
+                                break;
+                            }
+                        }
+
+                        if (atLeastOneExists) {
+                            ownedMitigations.put(mitigationId, record);
+                            String targetKey = buildTargetKey(targetIp, targetMac);
+                            targetIndex.put(targetKey, mitigationId);
+                        }
+                    }
+                }
+            }
+
+            // Also restore targetIndex entries from the persisted index
+            JSONObject indexes = root.optJSONObject("targetIndex");
+            if (indexes != null) {
+                for (String key : indexes.keySet()) {
+                    String indexedId = indexes.optString(key, null);
+                    if (indexedId != null && ownedMitigations.containsKey(indexedId)) {
+                        targetIndex.putIfAbsent(key, indexedId);
+                    }
+                }
+            }
+
+            if (!ownedMitigations.isEmpty()) {
+                helper.log(moduleName, "INFO",
+                        "Restored " + ownedMitigations.size() + " mitigation record(s) from persisted state");
+            }
+        } catch (Exception e) {
+            helper.log(moduleName, "WARN", "Failed to load persisted ODL mitigation state: " + e.getMessage());
+        }
     }
 }

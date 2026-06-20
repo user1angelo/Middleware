@@ -530,6 +530,12 @@ class OdlService {
                 throw new Error('No active mitigation found and no valid target provided');
             }
 
+            // Generate a temporary mitigation_id for traceability.
+            // The ODL module will resolve the actual flows via target-based
+            // scan when the provided mitigation_id does not match any
+            // in-memory or prefix-based record.
+            const tempMitigationId = this.createMitigationId();
+
             const publish = await this.publishManualWorkflowCommand(
                 'REMOVE_MITIGATION',
                 normalized.ip,
@@ -537,6 +543,7 @@ class OdlService {
                 'REMOVE_ISOLATION',
                 'Rollback mitigation via Network page (target fallback)',
                 {
+                    mitigation_id: tempMitigationId,
                     rollback_reason: reason || 'manual-clear',
                     rollback_scope: 'system_owned_only',
                     rollback_request_source: 'webapp.network_control',

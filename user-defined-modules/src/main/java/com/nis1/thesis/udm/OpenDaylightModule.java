@@ -71,6 +71,10 @@ public class OpenDaylightModule implements PluggableModule {
 
         this.running = true;
 
+        // Restore mitigation state from previous session so flows installed
+        // before a restart remain tracked and can be properly removed.
+        odlClient.loadPersistedState();
+
         helper.log(getName(), "INFO", "Initializing OpenDaylightModule... [VERSION 2.0 CHECK]");
         helper.log(getName(), "INFO", "Connected to ODL at: " + odlBaseUrl);
 
