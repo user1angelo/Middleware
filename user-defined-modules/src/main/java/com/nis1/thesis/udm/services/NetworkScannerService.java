@@ -13,6 +13,7 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Service for active network scanning and topology discovery.
@@ -41,7 +42,7 @@ public class NetworkScannerService {
         try {
             // 1. Identify Subnet
             String baseIp = null;
-            int subnetSize = 254; // Default Class C
+            int subnetSize = 254;
 
             if (startIp != null && !startIp.isEmpty()) {
                 helper.log(moduleName, "INFO", "Using provided start IP for scan: " + startIp);
@@ -63,9 +64,15 @@ public class NetworkScannerService {
                 }
 
                 String localIp = subnet.getAddress().getHostAddress();
+                short prefixLength = subnet.getNetworkPrefixLength();
                 helper.log(moduleName, "INFO", "Scanning local network interface: " + networkInterface.getDisplayName()
-                        + " (" + localIp + ")");
+                        + " (" + localIp + "/" + prefixLength + ")");
                 baseIp = localIp.substring(0, localIp.lastIndexOf('.') + 1);
+
+                if (prefixLength > 0 && prefixLength <= 32) {
+                    int rawSize = (1 << (32 - prefixLength)) - 2;
+                    subnetSize = Math.min(rawSize, 254);
+                }
             }
 
             if (baseIp == null) {
@@ -78,10 +85,17 @@ public class NetworkScannerService {
             List<String> activeIps = performPingSweep(baseIp, subnetSize);
             helper.log(moduleName, "INFO", "Ping sweep complete. Found " + activeIps.size() + " active hosts.");
 
-            // 3. Resolve MAC Addresses (ARP)
+            // 3. Wait for kernel ARP cache to populate after pings
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            // 4. Resolve MAC Addresses (ARP)
             Map<String, String> arpTable = getArpTable();
 
-            // 4. Correlate
+            // 5. Correlate
             for (String ip : activeIps) {
                 String mac = arpTable.getOrDefault(ip, "Unknown");
                 results.put(ip, mac);
@@ -97,7 +111,7 @@ public class NetworkScannerService {
 
     private List<String> performPingSweep(String baseIp, int limit) {
         List<String> activeIps = Collections.synchronizedList(new ArrayList<>());
-        ExecutorService executor = Executors.newFixedThreadPool(50); // High concurrency for speed
+        ExecutorService executor = Executors.newFixedThreadPool(10);
 
         try {
             List<Future<?>> futures = new ArrayList<>();
@@ -106,9 +120,12 @@ public class NetworkScannerService {
                 String targetIp = baseIp + i;
                 futures.add(executor.submit(() -> {
                     try {
-                        InetAddress address = InetAddress.getByName(targetIp);
-                        // 500ms timeout per host is reasonable for LAN
-                        if (address.isReachable(500)) {
+                        ProcessBuilder pb = new ProcessBuilder("ping", "-c", "1", "-W", "1", targetIp);
+                        Process process = pb.start();
+                        boolean completed = process.waitFor(2, TimeUnit.SECONDS);
+                        if (!completed) {
+                            process.destroyForcibly();
+                        } else if (process.exitValue() == 0) {
                             activeIps.add(targetIp);
                         }
                     } catch (Exception ignored) {
@@ -116,7 +133,6 @@ public class NetworkScannerService {
                 }));
             }
 
-            // Wait for all pings to finish
             for (Future<?> f : futures) {
                 try {
                     f.get();
@@ -128,6 +144,14 @@ public class NetworkScannerService {
             helper.log(moduleName, "ERROR", "Ping sweep error: " + e.getMessage());
         } finally {
             executor.shutdown();
+            try {
+                if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
 
         return activeIps;

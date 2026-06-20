@@ -1,8 +1,10 @@
 const http = require('http');
+const fs = require('fs');
 const amqp = require('amqplib');
 require('dotenv').config();
 
 // Configuration
+const SCAN_RESULTS_PATH = '/tmp/middleware_scan_results.json';
 const ODL_HOST = process.env.ODL_HOST || 'localhost';
 const ODL_PORT = process.env.ODL_PORT || 8181;
 const ODL_USER = process.env.ODL_USER || 'admin';
@@ -249,6 +251,32 @@ class OdlService {
         });
 
         const hosts = this.extractHostsFromTopology(topology);
+
+        // Merge scan results (ping sweep discoveries not yet in ODL host-tracker)
+        const scanResults = this.readScanResults();
+        if (scanResults && scanResults.hosts.length > 0) {
+            const existingIps = new Set(hosts.map(h => h.ip));
+            for (const sh of scanResults.hosts) {
+                if (sh.ip && !existingIps.has(sh.ip)) {
+                    hosts.push({
+                        id: 'host:' + (sh.mac && sh.mac !== 'Unknown' ? sh.mac : sh.ip.replace(/\./g, '-')),
+                        mac: sh.mac || 'Unknown',
+                        ip: sh.ip,
+                        attachment: 'Scan Discovery',
+                        localization: {
+                            status: LOCALIZATION_STATUS.PARTIAL,
+                            confidence: 'medium',
+                            node: DEFAULT_NODE,
+                            port: null,
+                            source_of_truth: 'ping_sweep',
+                            reason: 'Discovered via active ping sweep'
+                        }
+                    });
+                }
+            }
+            console.log(`🔍 Merged ${scanResults.hosts.length} scan hosts into topology (${existingIps.size} already known from ODL)`);
+        }
+
         return {
             ...topology,
             localization: {
@@ -789,6 +817,21 @@ class OdlService {
                 ]
             }
         };
+    }
+
+    readScanResults() {
+        try {
+            if (fs.existsSync(SCAN_RESULTS_PATH)) {
+                const raw = fs.readFileSync(SCAN_RESULTS_PATH, 'utf-8');
+                const parsed = JSON.parse(raw);
+                if (parsed && Array.isArray(parsed.hosts)) {
+                    return parsed;
+                }
+            }
+        } catch (err) {
+            console.warn('⚠️ Failed to read scan results:', err.message);
+        }
+        return null;
     }
 }
 

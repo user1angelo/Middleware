@@ -2,9 +2,13 @@ package com.nis1.thesis.udm;
 
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Properties;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.nis1.thesis.sdk.CoreSystemApi;
@@ -215,6 +219,26 @@ public class OpenDaylightModule implements PluggableModule {
         Map<String, String> results = scanner.scanNetwork(startIp);
 
         helper.log(getName(), "INFO", "Scan complete. Found " + results.size() + " hosts.");
+
+        // Write results to well-known file for backend consumption
+        try {
+            JSONObject scanResult = new JSONObject();
+            JSONArray hosts = new JSONArray();
+            for (Map.Entry<String, String> entry : results.entrySet()) {
+                JSONObject host = new JSONObject();
+                host.put("ip", entry.getKey());
+                host.put("mac", entry.getValue());
+                hosts.put(host);
+            }
+            scanResult.put("hosts", hosts);
+            scanResult.put("timestamp", Instant.now().toString());
+            scanResult.put("count", results.size());
+
+            Files.writeString(Paths.get("/tmp/middleware_scan_results.json"), scanResult.toString());
+            helper.log(getName(), "INFO", "Scan results written to /tmp/middleware_scan_results.json");
+        } catch (IOException e) {
+            helper.log(getName(), "ERROR", "Failed to write scan results file: " + e.getMessage());
+        }
 
         // Log discovered hosts
         for (Map.Entry<String, String> entry : results.entrySet()) {

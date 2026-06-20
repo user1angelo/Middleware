@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import '../App.css';
 
+const AUTO_SCAN_INTERVAL_MS = 300000; // 5 minutes
+
 const LOCALIZATION_STYLE = {
     resolved: { background: 'rgba(72, 187, 120, 0.2)', color: '#48bb78', border: '1px solid rgba(72, 187, 120, 0.35)' },
     partial: { background: 'rgba(246, 173, 85, 0.2)', color: '#f6ad55', border: '1px solid rgba(246, 173, 85, 0.35)' },
@@ -46,7 +48,7 @@ function NetworkControl() {
     const [selectedHost, setSelectedHost] = useState({ ip: '', mac: '' });
     const [isolateStatus, setIsolateStatus] = useState('');
     const [removeIsolationStatus, setRemoveIsolationStatus] = useState('');
-    const [scanStatus, setScanStatus] = useState('');
+    const [scanState, setScanState] = useState({ status: 'idle', message: '' });
     const [startIp, setStartIp] = useState('');
     const [isAutoScan, setIsAutoScan] = useState(false);
     const [lastIsolationLocalization, setLastIsolationLocalization] = useState(null);
@@ -108,7 +110,7 @@ function NetworkControl() {
 
     const triggerScan = async () => {
         try {
-            setScanStatus(isAutoScan ? 'Auto-Scanning...' : 'Scanning...');
+            setScanState({ status: 'scanning', message: isAutoScan ? 'Auto-Scanning...' : 'Scanning...' });
 
             const body = {};
             if (startIp) body.start_ip = startIp;
@@ -119,12 +121,15 @@ function NetworkControl() {
                 body: JSON.stringify(body)
             });
 
-            // Refresh topology shortly after triggering scan
-            setTimeout(fetchTopology, 1000);
-            setTimeout(() => setScanStatus(''), 3000);
+            setTimeout(async () => {
+                await fetchTopology();
+                setScanState(prev => prev.status === 'scanning' ? { status: 'done', message: 'Scan complete — topology refreshed' } : prev);
+                setTimeout(() => setScanState({ status: 'idle', message: '' }), 10000);
+            }, 3000);
         } catch (err) {
             console.error("Scan trigger failed:", err);
-            // Don't show error in UI for background access to avoid annoying flickering
+            setScanState({ status: 'error', message: `Scan failed: ${err.message}` });
+            setTimeout(() => setScanState({ status: 'idle', message: '' }), 10000);
         }
     };
 
@@ -292,9 +297,8 @@ function NetworkControl() {
         // 3. Auto-Scan logic
         let scanInterval = null;
         if (isAutoScan) {
-            // Trigger immediately when toggled on
             triggerScan();
-            scanInterval = setInterval(triggerScan, 15000);
+            scanInterval = setInterval(triggerScan, AUTO_SCAN_INTERVAL_MS);
         }
 
         return () => {
@@ -379,7 +383,7 @@ function NetworkControl() {
                             🌐 Network Topology
                             {isAutoScan && (
                                 <span className="status-badge status-running" style={{ fontSize: '0.6em', verticalAlign: 'middle', marginLeft: '10px' }}>
-                                    Auto-Scanning (15s)
+                                    Auto-Scanning (5m)
                                 </span>
                             )}
                         </h2>
@@ -412,6 +416,23 @@ function NetworkControl() {
                             </button>
                         </div>
                     </div>
+
+                    {scanState.status !== 'idle' && (
+                        <div style={{
+                            marginTop: '10px',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            fontSize: '0.9em',
+                            fontWeight: 600,
+                            background: scanState.status === 'error' ? 'rgba(252, 129, 129, 0.15)' :
+                                        scanState.status === 'scanning' ? 'rgba(246, 173, 85, 0.15)' :
+                                        'rgba(72, 187, 120, 0.15)',
+                            color: scanState.status === 'error' ? '#fc8181' :
+                                   scanState.status === 'scanning' ? '#f6ad55' : '#48bb78'
+                        }}>
+                            {scanState.message}
+                        </div>
+                    )}
 
                     {error && <div className="alert alert-error">{error}</div>}
 
