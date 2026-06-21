@@ -158,7 +158,14 @@ class OdlService {
         }
 
         const policy = this.normalizePolicyOptions(payload.quarantine_policy || {});
-        const lifecycle = this.normalizeLifecycleOptions(payload.lifecycle || {});
+
+        // Mirrored auto-isolation events MUST NOT auto-expire.
+        // Auto-isolation is a security response to an active threat;
+        // the only safe way to remove it is via explicit manual rollback.
+        const lifecycle = Object.assign(
+            this.normalizeLifecycleOptions(payload.lifecycle || {}),
+            { auto_expire: false }
+        );
         const mitigationId = payload.mitigation_id || fallbackEventId || this.createMitigationId();
         const localization = payload.localization || {
             status: LOCALIZATION_STATUS.FALLBACK,
