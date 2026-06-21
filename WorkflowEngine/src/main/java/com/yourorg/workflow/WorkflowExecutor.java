@@ -127,6 +127,17 @@ public class WorkflowExecutor {
                     payload.put(entry.getKey(), substituted);
                 }
             }
+            // Auto-generate a mitigation_id for INITIATE_MITIGATION commands
+            // that don't already carry one. This ensures the same ID flows
+            // end-to-end: WorkflowEngine → CommandRoutingListener →
+            // SdkModuleHost → ODL module, AND the mirrored copy →
+            // webapp dashboard. Without this, the webapp and Java ODL
+            // client track the same isolation under different IDs, causing
+            // cleanup to miss flows.
+            if ("INITIATE_MITIGATION".equals(commandType) && !payload.has("mitigation_id")) {
+                payload.put("mitigation_id", "mit-" + UUID.randomUUID().toString());
+            }
+
             command.put("payload", payload);
 
             // Publish to RabbitMQ

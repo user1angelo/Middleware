@@ -100,7 +100,7 @@ public class OpenDaylightClient {
     private static final int FLOW_REQUEST_MAX_RETRIES = 3;
     private static final long FLOW_REQUEST_BACKOFF_BASE_MS = 300L;
     private static final Pattern IPV4_PATTERN = Pattern.compile("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b");
-    private static final String PERSIST_FILE = "/tmp/middleware_odl_mitigations.json";
+    private static final String PERSIST_FILE = System.getProperty("user.home") + "/.middleware_odl_mitigations.json";
 
     private final Map<String, MitigationRecord> ownedMitigations = new ConcurrentHashMap<>();
     private final Map<String, String> targetIndex = new ConcurrentHashMap<>();
@@ -244,23 +244,26 @@ public class OpenDaylightClient {
         }
 
         MitigationRecord record = ownedMitigations.get(resolvedMitigationId);
+        // Prefer the record's own mitigationId for prefix-based operations;
+        // this defends against callers supplying a non-matching external ID.
+        String recordMitigationId = record != null ? record.mitigationId : resolvedMitigationId;
         if (record == null || record.installedFlows.isEmpty()) {
-            helper.log(moduleName, "WARN", "No in-memory flow records found for mitigation " + resolvedMitigationId
+            helper.log(moduleName, "WARN", "No in-memory flow records found for mitigation " + recordMitigationId
                     + "; falling back to prefix-based cleanup");
-            PrefixCleanupResult cleanup = removeOwnedFlowsByMitigationPrefixDetailed(resolvedMitigationId);
+            PrefixCleanupResult cleanup = removeOwnedFlowsByMitigationPrefixDetailed(recordMitigationId);
             if (cleanup.matchedFlows == 0 && cleanup.deletedHttp2xx == 0) {
-                helper.log(moduleName, "WARN", "Prefix cleanup found no flows for mitigation " + resolvedMitigationId
+                helper.log(moduleName, "WARN", "Prefix cleanup found no flows for mitigation " + recordMitigationId
                         + "; falling back to target-based scan for " + targetKey);
                 cleanup = removeFlowsByTargetScan(normalizedIp, normalizedMac);
             }
             if (cleanup.success) {
-                bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
-                evictMitigationFromMemoryByPrefix(resolvedMitigationId);
+                bestEffortVerifyFlowsClearedBeforeEvict(recordMitigationId);
+                evictMitigationFromMemoryByPrefix(recordMitigationId);
                 evictTargetFromMemory(normalizedIp, normalizedMac);
                 persistState();
             }
 
-            return new RemoveIsolationResult(cleanup.success, resolvedMitigationId, targetKey,
+            return new RemoveIsolationResult(cleanup.success, recordMitigationId, targetKey,
                     cleanup.matchedFlows, cleanup.deletedHttp2xx);
         }
 
@@ -280,31 +283,31 @@ public class OpenDaylightClient {
 
         if (allRemovedOrAbsent) {
             if (matchedFlows == 0 || deletedHttp2xx == 0) {
-                helper.log(moduleName, "WARN", "REMOVE_MITIGATION for mitigation " + resolvedMitigationId
+                helper.log(moduleName, "WARN", "REMOVE_MITIGATION for mitigation " + recordMitigationId
                         + " target " + targetKey
                         + ": no flows were found or deleted — isolation may not have been active");
             }
-            bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
-            evictMitigationFromMemory(resolvedMitigationId);
+            bestEffortVerifyFlowsClearedBeforeEvict(recordMitigationId);
+            evictMitigationFromMemory(recordMitigationId);
             persistState();
-            helper.log(moduleName, "INFO", "Removed system-owned quarantine rules for mitigation " + resolvedMitigationId);
+            helper.log(moduleName, "INFO", "Removed system-owned quarantine rules for mitigation " + recordMitigationId);
         } else {
-            helper.log(moduleName, "WARN", "Some tracked flow deletions failed for mitigation " + resolvedMitigationId
+            helper.log(moduleName, "WARN", "Some tracked flow deletions failed for mitigation " + recordMitigationId
                     + "; attempting prefix-based cleanup fallback");
-            PrefixCleanupResult cleanup = removeOwnedFlowsByMitigationPrefixDetailed(resolvedMitigationId);
+            PrefixCleanupResult cleanup = removeOwnedFlowsByMitigationPrefixDetailed(recordMitigationId);
             deletedHttp2xx += cleanup.deletedHttp2xx;
             matchedFlows += cleanup.matchedFlows;
             if (cleanup.success) {
-                bestEffortVerifyFlowsClearedBeforeEvict(resolvedMitigationId);
-                evictMitigationFromMemoryByPrefix(resolvedMitigationId);
+                bestEffortVerifyFlowsClearedBeforeEvict(recordMitigationId);
+                evictMitigationFromMemoryByPrefix(recordMitigationId);
                 persistState();
-                helper.log(moduleName, "INFO", "Fallback cleanup completed for mitigation " + resolvedMitigationId);
-                return new RemoveIsolationResult(true, resolvedMitigationId, targetKey, matchedFlows, deletedHttp2xx);
+                helper.log(moduleName, "INFO", "Fallback cleanup completed for mitigation " + recordMitigationId);
+                return new RemoveIsolationResult(true, recordMitigationId, targetKey, matchedFlows, deletedHttp2xx);
             }
-            helper.log(moduleName, "ERROR", "Failed to remove some system-owned quarantine rules for mitigation " + resolvedMitigationId);
+            helper.log(moduleName, "ERROR", "Failed to remove some system-owned quarantine rules for mitigation " + recordMitigationId);
         }
 
-        return new RemoveIsolationResult(allRemovedOrAbsent, resolvedMitigationId, targetKey, matchedFlows, deletedHttp2xx);
+        return new RemoveIsolationResult(allRemovedOrAbsent, recordMitigationId, targetKey, matchedFlows, deletedHttp2xx);
     }
 
     public boolean applyProtocolDrop(String sourceIp, int ipProtocol, String mitigationId) {
