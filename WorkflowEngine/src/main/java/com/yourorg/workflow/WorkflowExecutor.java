@@ -138,6 +138,23 @@ public class WorkflowExecutor {
                 payload.put("mitigation_id", "mit-" + UUID.randomUUID().toString());
             }
 
+            // Propagate telemetry
+            if (alert.has("telemetry")) {
+                JSONObject incomingTelemetry = alert.getJSONObject("telemetry");
+                JSONObject telemetry = new JSONObject(incomingTelemetry.toString());
+                
+                long workflowTimeMillis = System.currentTimeMillis();
+                String workflowTimeStr = ZonedDateTime.now(MANILA_ZONE).format(ISO_FORMATTER);
+                telemetry.put("workflow_execution_time", workflowTimeStr);
+                telemetry.put("workflow_execution_time_ms", workflowTimeMillis);
+
+                long systemReceivedTimeMillis = telemetry.optLong("system_received_time_ms", workflowTimeMillis);
+                double receivedToWorkflowDelay = (workflowTimeMillis - systemReceivedTimeMillis) / 1000.0;
+                telemetry.put("received_to_workflow_delay_sec", receivedToWorkflowDelay);
+
+                command.put("telemetry", telemetry);
+            }
+
             command.put("payload", payload);
 
             // Publish to RabbitMQ

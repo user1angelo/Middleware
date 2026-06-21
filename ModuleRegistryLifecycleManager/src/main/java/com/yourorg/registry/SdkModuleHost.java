@@ -243,6 +243,13 @@ public class SdkModuleHost {
         additional.put("rollback_request_source", payload.optString("rollback_request_source", ""));
         additional.put("rollback_reason", payload.optString("rollback_reason", ""));
 
+        // Copy telemetry if present
+        if (json.has("telemetry")) {
+            additional.put("telemetry", json.getJSONObject("telemetry"));
+        } else if (payload.has("telemetry")) {
+            additional.put("telemetry", payload.getJSONObject("telemetry"));
+        }
+
         JSONObject policy = payload.optJSONObject("quarantine_policy");
         if (policy != null) {
             additional.put("quarantine_policy", policy);

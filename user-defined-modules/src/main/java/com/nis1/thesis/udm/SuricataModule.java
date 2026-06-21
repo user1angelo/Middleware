@@ -410,15 +410,32 @@ public class SuricataModule {
 
         // Parse and format the timestamp
         String timestamp;
+        long alertTimeMillis = System.currentTimeMillis();
+        long systemReceivedTimeMillis = System.currentTimeMillis();
         try {
             DateTimeFormatter inputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSZ");
             OffsetDateTime odt = OffsetDateTime.parse(eveLog.timestamp, inputFormatter);
             timestamp = odt.format(DateTimeFormatter.ISO_INSTANT);
+            alertTimeMillis = odt.toInstant().toEpochMilli();
         } catch (Exception e) {
             // Fallback to current time if timestamp parsing fails
             timestamp = Instant.now().toString();
+            alertTimeMillis = Instant.parse(timestamp).toEpochMilli();
         }
         alert.put("timestamp", timestamp);
+
+        // Add Thesis telemetry metadata
+        JSONObject telemetry = new JSONObject();
+        telemetry.put("alert_generated_time", timestamp);
+        telemetry.put("alert_generated_time_ms", alertTimeMillis);
+        
+        String systemReceivedTimeStr = Instant.now().toString();
+        telemetry.put("system_received_time", systemReceivedTimeStr);
+        telemetry.put("system_received_time_ms", systemReceivedTimeMillis);
+        
+        double delaySec = (systemReceivedTimeMillis - alertTimeMillis) / 1000.0;
+        telemetry.put("alert_to_received_delay_sec", delaySec);
+        alert.put("telemetry", telemetry);
 
         alert.put("event_type", "alerts.network.suricata");
         alert.put("source_module", MODULE_NAME);

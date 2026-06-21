@@ -122,11 +122,14 @@ public class OpenDaylightModule implements PluggableModule {
                                                                                         // useful, otherwise we trust
                                                                                         // the fields
 
+            boolean success = false;
+            long appliedTimeMillis = System.currentTimeMillis();
             if (action == MitigationAction.BLOCK_IP ||
                     action == MitigationAction.QUARANTINE ||
                     action == MitigationAction.ISOLATE_VLAN) {
 
-                boolean success = odlClient.isolateHost(targetHost, targetMac, mitigationId, policyOptions);
+                success = odlClient.isolateHost(targetHost, targetMac, mitigationId, policyOptions);
+                appliedTimeMillis = System.currentTimeMillis(); // rule applied time
                 if (success) {
                     helper.log(getName(), "INFO", "Successfully isolated host: " + targetHost
                             + " [mode=" + policyOptions.mode
@@ -137,6 +140,40 @@ public class OpenDaylightModule implements PluggableModule {
                 }
             } else {
                 helper.log(getName(), "WARN", "Action " + action + " not supported by ODL module yet.");
+            }
+
+            // Print Thesis Latency and Performance Performance Analysis Log
+            if (metadata.has("telemetry")) {
+                try {
+                    JSONObject telemetry = metadata.getJSONObject("telemetry");
+                    long alertTimeMs = telemetry.optLong("alert_generated_time_ms", 0);
+                    long recTimeMs = telemetry.optLong("system_received_time_ms", 0);
+                    long wfTimeMs = telemetry.optLong("workflow_execution_time_ms", 0);
+                    
+                    double alertToRec = telemetry.optDouble("alert_to_received_delay_sec", 0.0);
+                    double recToWf = telemetry.optDouble("received_to_workflow_delay_sec", 0.0);
+                    double wfToApplied = (appliedTimeMillis - wfTimeMs) / 1000.0;
+                    double totalDuration = (appliedTimeMillis - alertTimeMs) / 1000.0;
+                    
+                    String analysisLog = String.format(
+                        "\n================ THESIS PERFORMANCE BENCHMARK ================\n" +
+                        "1. Suricata Alert Generation Time: %s\n" +
+                        "2. System Received Alert Time:     %s (Delay from alert: %.3f sec)\n" +
+                        "3. Workflow & ODL API Triggered:   %s (Delay from receipt: %.3f sec)\n" +
+                        "4. SDN Isolation Rules Applied:    %s (Delay from API call: %.3f sec)\n" +
+                        "5. Total Containment Pipeline Duration: %.3f seconds\n" +
+                        "==============================================================",
+                        telemetry.optString("alert_generated_time", "N/A"),
+                        telemetry.optString("system_received_time", "N/A"), alertToRec,
+                        telemetry.optString("workflow_execution_time", "N/A"), recToWf,
+                        Instant.ofEpochMilli(appliedTimeMillis).toString(), wfToApplied,
+                        totalDuration
+                    );
+                    helper.log(getName(), "INFO", analysisLog);
+                    System.out.println(analysisLog);
+                } catch (Exception ex) {
+                    helper.log(getName(), "WARN", "Failed to parse telemetry benchmark data: " + ex.getMessage());
+                }
             }
 
         } catch (Exception e) {
