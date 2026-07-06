@@ -154,6 +154,9 @@ public class SdkModuleHost {
                 payload = parseMitigationCommand(json);
             } else if ("INSTALL_PROACTIVE_POLICY".equals(eventType)) {
                 JSONObject policyPayload = json.optJSONObject("payload");
+                if (policyPayload != null && json.has("telemetry") && !policyPayload.has("telemetry")) {
+                    policyPayload.put("telemetry", json.getJSONObject("telemetry"));
+                }
                 payload = policyPayload != null ? policyPayload : json;
             } else if ("ODL_TOPOLOGY_DISCOVER".equals(eventType)) {
                 payload = json; // Pass full JSON
@@ -258,6 +261,13 @@ public class SdkModuleHost {
         JSONObject lifecycle = payload.optJSONObject("lifecycle");
         if (lifecycle != null) {
             additional.put("lifecycle", lifecycle);
+        }
+
+        // Copy any additional custom properties from payload (e.g. severity)
+        for (String key : payload.keySet()) {
+            if (!additional.has(key)) {
+                additional.put(key, payload.get(key));
+            }
         }
 
         data.setAdditionalParameters(additional.toString());

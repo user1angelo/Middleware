@@ -512,7 +512,7 @@ public class ZeekModule {
         // involves high port count or sensitive ports)
         // In this simple implementation, we'll keep "Scan::Port_Scan" but rely on
         // whitelist to filter out authorized scanners
-        if (combined.contains("scan::port_scan") && !combined.contains("local")) {
+        if ((combined.contains("scan::port_scan") || combined.contains("scan::address_scan")) && !combined.contains("local")) {
             return true;
         }
 

@@ -17,3 +17,4 @@ steps:
           targetHost: "{{ trigger.payload.source_ip }}"
           action: "QUARANTINE"
           justification: "ARP spoofing/poisoning indicators detected."
+          severity: "{{ trigger.payload.severity }}"

@@ -17,3 +17,4 @@ steps:
           targetHost: "{{ trigger.payload.source_ip }}"
           action: "ISOLATE_VLAN"
           justification: "DNS amplification indicators detected (UDP/53 volumetric anomaly)."
+          severity: "{{ trigger.payload.severity }}"

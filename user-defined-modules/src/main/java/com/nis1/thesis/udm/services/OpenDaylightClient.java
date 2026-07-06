@@ -1462,7 +1462,7 @@ public class OpenDaylightClient {
         }
     }
 
-    void loadPersistedState() {
+    public void loadPersistedState() {
         Path path = Paths.get(PERSIST_FILE);
         if (!Files.exists(path)) {
             return;
@@ -1545,5 +1545,46 @@ public class OpenDaylightClient {
         } catch (Exception e) {
             helper.log(moduleName, "WARN", "Failed to load persisted ODL mitigation state: " + e.getMessage());
         }
+    }
+
+    public Map<String, List<String>> checkConflictingIpMacBindings() {
+        Map<String, List<String>> ipToMacs = new java.util.HashMap<>();
+        try {
+            JSONObject topology = fetchTopology();
+            if (topology != null) {
+                JSONObject networkTopology = topology.optJSONObject("network-topology");
+                JSONArray topologies = networkTopology != null ? networkTopology.optJSONArray("topology") : null;
+                if (topologies != null) {
+                    for (int i = 0; i < topologies.length(); i++) {
+                        JSONObject topo = topologies.optJSONObject(i);
+                        if (topo == null) continue;
+                        JSONArray nodeArray = topo.optJSONArray("node");
+                        if (nodeArray == null) continue;
+                        for (int j = 0; j < nodeArray.length(); j++) {
+                            JSONObject node = nodeArray.optJSONObject(j);
+                            if (node == null) continue;
+                            String nodeId = node.optString("node-id", "");
+                            if (!nodeId.startsWith("host:")) continue;
+                            String mac = nodeId.replace("host:", "").toLowerCase();
+                            JSONArray addresses = node.optJSONArray("host-tracker-service:addresses");
+                            if (addresses != null) {
+                                for (int k = 0; k < addresses.length(); k++) {
+                                    JSONObject addr = addresses.optJSONObject(k);
+                                    if (addr != null) {
+                                        String ip = addr.optString("ip", "");
+                                        if (!ip.isEmpty()) {
+                                            ipToMacs.computeIfAbsent(ip, x -> new ArrayList<>()).add(mac);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            helper.log(moduleName, "WARN", "Failed to check IP-MAC bindings: " + e.getMessage());
+        }
+        return ipToMacs;
     }
 }

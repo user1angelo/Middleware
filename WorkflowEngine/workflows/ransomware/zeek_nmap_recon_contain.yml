@@ -17,3 +17,4 @@ steps:
           targetHost: "{{ trigger.payload.source_ip }}"
           action: "ISOLATE_VLAN"
           justification: "Reconnaissance activity detected (scan/sweep)."
+          severity: "{{ trigger.payload.severity }}"

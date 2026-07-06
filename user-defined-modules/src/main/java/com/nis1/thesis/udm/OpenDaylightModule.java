@@ -124,6 +124,31 @@ public class OpenDaylightModule implements PluggableModule {
 
             boolean success = false;
             long appliedTimeMillis = System.currentTimeMillis();
+            
+            String justification = command.getJustification();
+            String severity = metadata.optString("severity", "medium").toLowerCase();
+            
+            if (justification != null && (justification.contains("ARP") || justification.contains("arp") || justification.contains("spoof"))) {
+                helper.log(getName(), "INFO", "ARP Spoofing mitigation triggered. Checking operational inventory for conflicting IP-MAC bindings...");
+                java.util.Map<String, java.util.List<String>> conflicts = odlClient.checkConflictingIpMacBindings();
+                for (java.util.Map.Entry<String, java.util.List<String>> entry : conflicts.entrySet()) {
+                    if (entry.getValue().size() > 1) {
+                        helper.log(getName(), "WARN", "⚠️ CONFLICTING IP-MAC BINDING DETECTED: IP " + entry.getKey() + " is bound to MACs: " + entry.getValue());
+                    }
+                }
+            }
+            
+            if (justification != null && (justification.contains("Reconnaissance") || justification.contains("recon") || justification.contains("scan"))) {
+                helper.log(getName(), "INFO", "Reconnaissance mitigation triggered. Severity: " + severity);
+                if (severity.equals("critical") || severity.equals("high")) {
+                    helper.log(getName(), "INFO", "High severity recon detected. Isolating host: " + targetHost);
+                    action = MitigationAction.ISOLATE_VLAN;
+                } else {
+                    helper.log(getName(), "INFO", "Medium/Low severity recon detected. Applying targeted SDN blocking for host: " + targetHost);
+                    action = MitigationAction.BLOCK_IP;
+                }
+            }
+
             if (action == MitigationAction.BLOCK_IP ||
                     action == MitigationAction.QUARANTINE ||
                     action == MitigationAction.ISOLATE_VLAN) {
@@ -142,39 +167,7 @@ public class OpenDaylightModule implements PluggableModule {
                 helper.log(getName(), "WARN", "Action " + action + " not supported by ODL module yet.");
             }
 
-            // Print Thesis Latency and Performance Performance Analysis Log
-            if (metadata.has("telemetry")) {
-                try {
-                    JSONObject telemetry = metadata.getJSONObject("telemetry");
-                    long alertTimeMs = telemetry.optLong("alert_generated_time_ms", 0);
-                    long recTimeMs = telemetry.optLong("system_received_time_ms", 0);
-                    long wfTimeMs = telemetry.optLong("workflow_execution_time_ms", 0);
-                    
-                    double alertToRec = telemetry.optDouble("alert_to_received_delay_sec", 0.0);
-                    double recToWf = telemetry.optDouble("received_to_workflow_delay_sec", 0.0);
-                    double wfToApplied = (appliedTimeMillis - wfTimeMs) / 1000.0;
-                    double totalDuration = (appliedTimeMillis - alertTimeMs) / 1000.0;
-                    
-                    String analysisLog = String.format(
-                        "\n================ THESIS PERFORMANCE BENCHMARK ================\n" +
-                        "1. Suricata Alert Generation Time: %s\n" +
-                        "2. System Received Alert Time:     %s (Delay from alert: %.3f sec)\n" +
-                        "3. Workflow & ODL API Triggered:   %s (Delay from receipt: %.3f sec)\n" +
-                        "4. SDN Isolation Rules Applied:    %s (Delay from API call: %.3f sec)\n" +
-                        "5. Total Containment Pipeline Duration: %.3f seconds\n" +
-                        "==============================================================",
-                        telemetry.optString("alert_generated_time", "N/A"),
-                        telemetry.optString("system_received_time", "N/A"), alertToRec,
-                        telemetry.optString("workflow_execution_time", "N/A"), recToWf,
-                        Instant.ofEpochMilli(appliedTimeMillis).toString(), wfToApplied,
-                        totalDuration
-                    );
-                    helper.log(getName(), "INFO", analysisLog);
-                    System.out.println(analysisLog);
-                } catch (Exception ex) {
-                    helper.log(getName(), "WARN", "Failed to parse telemetry benchmark data: " + ex.getMessage());
-                }
-            }
+            logTelemetryBenchmark(metadata, appliedTimeMillis, "SDN Isolation Rules Applied");
 
         } catch (Exception e) {
             helper.log(getName(), "ERROR", "Error handling mitigation: " + e.getMessage());
@@ -396,6 +389,7 @@ public class OpenDaylightModule implements PluggableModule {
             } else {
                 helper.log(getName(), "ERROR", "❌ Failed to install proactive policy: " + policyName);
             }
+            logTelemetryBenchmark(policyData, System.currentTimeMillis(), "SDN Policy Rules Applied");
 
         } catch (Exception e) {
             helper.log(getName(), "ERROR", "Error installing proactive policy: " + e.getMessage());
@@ -581,6 +575,42 @@ public class OpenDaylightModule implements PluggableModule {
         }
 
         return options;
+    }
+
+    private void logTelemetryBenchmark(JSONObject metadata, long appliedTimeMillis, String appliedLabel) {
+        if (metadata == null || !metadata.has("telemetry")) {
+            return;
+        }
+
+        try {
+            JSONObject telemetry = metadata.getJSONObject("telemetry");
+            long alertTimeMs = telemetry.optLong("alert_generated_time_ms", 0);
+            long wfTimeMs = telemetry.optLong("workflow_execution_time_ms", 0);
+
+            double alertToRec = telemetry.optDouble("alert_to_received_delay_sec", 0.0);
+            double recToWf = telemetry.optDouble("received_to_workflow_delay_sec", 0.0);
+            double wfToApplied = wfTimeMs > 0 ? (appliedTimeMillis - wfTimeMs) / 1000.0 : 0.0;
+            double totalDuration = alertTimeMs > 0 ? (appliedTimeMillis - alertTimeMs) / 1000.0 : 0.0;
+
+            String analysisLog = String.format(
+                "\n================ THESIS PERFORMANCE BENCHMARK ================\n" +
+                "1. Suricata Alert Generation Time: %s\n" +
+                "2. System Received Alert Time:     %s (Delay from alert: %.3f sec)\n" +
+                "3. Workflow & ODL API Triggered:   %s (Delay from receipt: %.3f sec)\n" +
+                "4. %s:    %s (Delay from API call: %.3f sec)\n" +
+                "5. Total Containment Pipeline Duration: %.3f seconds\n" +
+                "==============================================================",
+                telemetry.optString("alert_generated_time", "N/A"),
+                telemetry.optString("system_received_time", "N/A"), alertToRec,
+                telemetry.optString("workflow_execution_time", "N/A"), recToWf,
+                appliedLabel, Instant.ofEpochMilli(appliedTimeMillis).toString(), wfToApplied,
+                totalDuration
+            );
+            helper.log(getName(), "INFO", analysisLog);
+            System.out.println(analysisLog);
+        } catch (Exception ex) {
+            helper.log(getName(), "WARN", "Failed to parse telemetry benchmark data: " + ex.getMessage());
+        }
     }
 
     private String normalizeMac(String mac) {

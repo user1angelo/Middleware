@@ -17,3 +17,4 @@ steps:
           targetHost: "{{ trigger.payload.source_ip }}"
           action: "ISOLATE_VLAN"
           justification: "TCP SYN scan detected from source host."
+          severity: "{{ trigger.payload.severity }}"

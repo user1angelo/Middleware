@@ -19,3 +19,4 @@ steps:
           protocol: "icmp"
           source_ip: "{{ trigger.payload.source_ip }}"
           justification: "ICMP echo request flood detected."
+          severity: "{{ trigger.payload.severity }}"
