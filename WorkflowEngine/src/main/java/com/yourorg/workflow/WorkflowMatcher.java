@@ -162,20 +162,38 @@ public class WorkflowMatcher {
 
         // Check severity
         if (condition.contains("severity")) {
-            String severity = extractValueFromCondition(condition, "severity", "==");
-            if (severity != null) {
-                if (!payload.has("severity") || !payload.getString("severity").equals(severity)) {
-                    return false;
+            if (condition.contains("!=")) {
+                String severity = extractValueFromCondition(condition, "severity", "!=");
+                if (severity != null) {
+                    if (payload.has("severity") && payload.getString("severity").equalsIgnoreCase(severity)) {
+                        return false;
+                    }
+                }
+            } else {
+                String severity = extractValueFromCondition(condition, "severity", "==");
+                if (severity != null) {
+                    if (!payload.has("severity") || !payload.getString("severity").equals(severity)) {
+                        return false;
+                    }
                 }
             }
         }
-        
+
         // Check signature
         if (condition.contains("signature")) {
-            String signature = extractValueFromCondition(condition, "signature", "==");
-            if (signature != null) {
-                if (!payload.has("signature") || !payload.getString("signature").equals(signature)) {
+            if (condition.contains("contains")) {
+                // Handle contains operator with OR logic:
+                // "signature contains 'A' or signature contains 'B'" →
+                // match if actual signature contains A OR B
+                if (!evaluateFieldContains(condition, payload, "signature")) {
                     return false;
+                }
+            } else {
+                String signature = extractValueFromCondition(condition, "signature", "==");
+                if (signature != null) {
+                    if (!payload.has("signature") || !payload.getString("signature").equals(signature)) {
+                        return false;
+                    }
                 }
             }
         }
@@ -273,6 +291,49 @@ public class WorkflowMatcher {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /**
+     * Evaluate "field contains 'value'" conditions with OR semantics.
+     * Extracts all quoted values from "field contains '...'" patterns in
+     * the condition string and returns true if the actual field value
+     * contains ANY of them (implicit OR across clauses).
+     * 
+     * Note: if future conditions use "and" between multiple contains
+     * clauses for the same field, this OR logic would be too permissive.
+     * Current workflows only use "or" for multi-value signature matching.
+     */
+    private boolean evaluateFieldContains(String condition, JSONObject payload, String field) {
+        if (!payload.has(field)) {
+            return false;
+        }
+        String actualValue = payload.getString(field).toLowerCase();
+
+        String pattern = field + " contains ";
+        int pos = 0;
+        while ((pos = condition.indexOf(pattern, pos)) != -1) {
+            pos += pattern.length();
+            while (pos < condition.length()
+                    && condition.charAt(pos) != '\''
+                    && condition.charAt(pos) != '"') {
+                pos++;
+            }
+            if (pos >= condition.length()) {
+                break;
+            }
+            char quote = condition.charAt(pos);
+            pos++;
+            int endPos = condition.indexOf(quote, pos);
+            if (endPos == -1) {
+                break;
+            }
+            String expectedValue = condition.substring(pos, endPos).toLowerCase();
+            if (actualValue.contains(expectedValue)) {
+                return true;
+            }
+            pos = endPos + 1;
+        }
+        return false;
     }
 }
 
