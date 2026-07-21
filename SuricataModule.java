@@ -384,9 +384,7 @@ public class SuricataModule {
         
         String lower = signature.toLowerCase();
         
-        if (lower.contains("ransomware")) {
-            return "ransomware";
-        } else if (lower.contains("malware") || lower.contains("trojan")) {
+        if (lower.contains("malware") || lower.contains("trojan")) {
             return "malware";
         } else if (lower.contains("exploit") || lower.contains("cve-")) {
             return "exploit";
@@ -402,6 +400,8 @@ public class SuricataModule {
             return "apt_activity";
         } else if (lower.contains("c2") || lower.contains("command")) {
             return "c2_communication";
+        } else if (lower.contains("ransomware")) {
+            return "ransomware";
         } else {
             return "network_threat";
         }
