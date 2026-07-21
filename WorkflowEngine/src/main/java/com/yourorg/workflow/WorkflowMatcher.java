@@ -198,6 +198,25 @@ public class WorkflowMatcher {
             }
         }
         
+        // Check Suricata signature id / SID
+        if (condition.contains("signature_id") || condition.contains("signatureId") || condition.contains("sid")) {
+            String expectedSignatureId = extractValueFromCondition(condition, "signature_id", "==");
+            if (expectedSignatureId == null) {
+                expectedSignatureId = extractValueFromCondition(condition, "signatureId", "==");
+            }
+            if (expectedSignatureId == null) {
+                expectedSignatureId = extractValueFromCondition(condition, "sid", "==");
+            }
+
+            if (expectedSignatureId != null) {
+                String actualSignatureId = payload.optString("signature_id",
+                        payload.optString("signatureId", payload.optString("sid", "")));
+                if (!actualSignatureId.equalsIgnoreCase(expectedSignatureId)) {
+                    return false;
+                }
+            }
+        }
+
         // Check threat_score
         if (condition.contains("threat_score")) {
             Integer threshold = extractNumberFromCondition(condition, "threat_score", ">=");
