@@ -255,11 +255,18 @@ public class OpenDaylightClient {
                 helper.log(moduleName, "WARN", "Prefix cleanup found no flows for mitigation " + recordMitigationId
                         + "; falling back to target-based scan for " + targetKey);
                 cleanup = removeFlowsByTargetScan(normalizedIp, normalizedMac);
+            } else if (cleanup.success) {
+                // A known mitigation ID may be only one of several automatic
+                // isolations for the same host.
+                PrefixCleanupResult residualCleanup = removeFlowsByTargetScan(normalizedIp, normalizedMac);
+                cleanup = new PrefixCleanupResult(residualCleanup.success,
+                        cleanup.matchedFlows + residualCleanup.matchedFlows,
+                        cleanup.deletedHttp2xx + residualCleanup.deletedHttp2xx);
             }
             if (cleanup.success) {
                 bestEffortVerifyFlowsClearedBeforeEvict(recordMitigationId);
                 evictMitigationFromMemoryByPrefix(recordMitigationId);
-                evictTargetFromMemory(normalizedIp, normalizedMac);
+                evictMitigationsMatchingTarget(normalizedIp, normalizedMac);
                 persistState();
             }
 
@@ -282,15 +289,26 @@ public class OpenDaylightClient {
         }
 
         if (allRemovedOrAbsent) {
+            // Automatic alerts can create rules under more than one mitigation
+            // ID for a host. The target index identifies only the newest one,
+            // so remove every remaining system-owned flow for that host too.
+            PrefixCleanupResult residualCleanup = removeFlowsByTargetScan(normalizedIp, normalizedMac);
+            matchedFlows += residualCleanup.matchedFlows;
+            deletedHttp2xx += residualCleanup.deletedHttp2xx;
+            if (!residualCleanup.success) {
+                helper.log(moduleName, "ERROR", "Failed to remove all system-owned quarantine rules for target "
+                        + targetKey + " after clearing mitigation " + recordMitigationId);
+                return new RemoveIsolationResult(false, recordMitigationId, targetKey, matchedFlows, deletedHttp2xx);
+            }
             if (matchedFlows == 0 || deletedHttp2xx == 0) {
                 helper.log(moduleName, "WARN", "REMOVE_MITIGATION for mitigation " + recordMitigationId
                         + " target " + targetKey
                         + ": no flows were found or deleted — isolation may not have been active");
             }
             bestEffortVerifyFlowsClearedBeforeEvict(recordMitigationId);
-            evictMitigationFromMemory(recordMitigationId);
+            evictMitigationsMatchingTarget(normalizedIp, normalizedMac);
             persistState();
-            helper.log(moduleName, "INFO", "Removed system-owned quarantine rules for mitigation " + recordMitigationId);
+            helper.log(moduleName, "INFO", "Removed all system-owned quarantine rules for target " + targetKey);
         } else {
             helper.log(moduleName, "WARN", "Some tracked flow deletions failed for mitigation " + recordMitigationId
                     + "; attempting prefix-based cleanup fallback");
@@ -298,8 +316,16 @@ public class OpenDaylightClient {
             deletedHttp2xx += cleanup.deletedHttp2xx;
             matchedFlows += cleanup.matchedFlows;
             if (cleanup.success) {
+                PrefixCleanupResult residualCleanup = removeFlowsByTargetScan(normalizedIp, normalizedMac);
+                matchedFlows += residualCleanup.matchedFlows;
+                deletedHttp2xx += residualCleanup.deletedHttp2xx;
+                if (!residualCleanup.success) {
+                    helper.log(moduleName, "ERROR", "Failed to remove all system-owned quarantine rules for target "
+                            + targetKey + " after fallback cleanup");
+                    return new RemoveIsolationResult(false, recordMitigationId, targetKey, matchedFlows, deletedHttp2xx);
+                }
                 bestEffortVerifyFlowsClearedBeforeEvict(recordMitigationId);
-                evictMitigationFromMemoryByPrefix(recordMitigationId);
+                evictMitigationsMatchingTarget(normalizedIp, normalizedMac);
                 persistState();
                 helper.log(moduleName, "INFO", "Fallback cleanup completed for mitigation " + recordMitigationId);
                 return new RemoveIsolationResult(true, recordMitigationId, targetKey, matchedFlows, deletedHttp2xx);
@@ -619,6 +645,31 @@ public class OpenDaylightClient {
 
         for (String id : toRemove) {
             ownedMitigations.remove(id);
+        }
+    }
+
+    /**
+     * Evicts all local records for a host. Automatic IP-only and MAC-only
+     * mitigations have different index keys, so exact-key eviction is not
+     * enough after a complete host rollback.
+     */
+    private void evictMitigationsMatchingTarget(String normalizedIp, String normalizedMac) {
+        List<String> toRemove = new ArrayList<>();
+        for (Map.Entry<String, MitigationRecord> entry : ownedMitigations.entrySet()) {
+            MitigationRecord record = entry.getValue();
+            if (record == null) {
+                continue;
+            }
+
+            boolean sameIp = normalizedIp != null && normalizedIp.equals(record.targetIp);
+            boolean sameMac = normalizedMac != null && normalizedMac.equalsIgnoreCase(record.targetMac);
+            if (sameIp || sameMac) {
+                toRemove.add(entry.getKey());
+            }
+        }
+
+        for (String mitigationId : toRemove) {
+            evictMitigationFromMemory(mitigationId);
         }
     }
 
