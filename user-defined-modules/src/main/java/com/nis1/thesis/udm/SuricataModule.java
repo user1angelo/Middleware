@@ -582,8 +582,7 @@ public class SuricataModule {
         // Example msgs:
         // - "ET TROJAN Ryuk Ransom Note"
         // - "ET TROJAN Ryuk Encrypted File"
-        if (lower.contains("ryuk") || lower.contains(".ryk") || lower.contains("rykreadme")
-                || lower.contains("badrabbit")) {
+        if (lower.contains("ryuk") || lower.contains(".ryk") || lower.contains("rykreadme")) {
             return "ransomware";
         }
 
