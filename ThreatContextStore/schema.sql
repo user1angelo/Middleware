@@ -1,6 +1,6 @@
-DROP TABLE IF EXISTS wazuh_alerts;
+DROP TABLE IF EXISTS alerts;
 
-CREATE TABLE wazuh_alerts (
+CREATE TABLE alerts (
     event_id UUID PRIMARY KEY,              -- unique event identifier
     message_type VARCHAR(50) NOT NULL,      -- message type: alert, query, query_response
     timestamp TIMESTAMPTZ NOT NULL,         -- event timestamp
@@ -12,8 +12,8 @@ CREATE TABLE wazuh_alerts (
 );
 
 -- Create indexes for better query performance
-CREATE INDEX idx_wazuh_alerts_message_type ON wazuh_alerts(message_type);
-CREATE INDEX idx_wazuh_alerts_timestamp ON wazuh_alerts(timestamp);
-CREATE INDEX idx_wazuh_alerts_payload ON wazuh_alerts USING GIN(payload);
+CREATE INDEX idx_alerts_message_type ON alerts(message_type);
+CREATE INDEX idx_alerts_timestamp ON alerts(timestamp);
+CREATE INDEX idx_alerts_payload ON alerts USING GIN(payload);
 
-GRANT ALL PRIVILEGES ON TABLE wazuh_alerts TO postgres;
+GRANT ALL PRIVILEGES ON TABLE alerts TO postgres;

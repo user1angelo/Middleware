@@ -1,0 +1,228 @@
+Prompt for AI Presentation Generator
+
+Copy everything below into the other AI tool (e.g. Gamma, Tome, Canva AI, ChatGPT, Claude for PowerPoint, etc.)
+
+You are an expert presentation designer helping me build my Thesis Final Defense deck for the CTTHES3 course at De La Salle University. Follow the structure, timing, and content below exactly.
+
+Thesis Identity
+Title: An Extensible SOAR SDK with SDN Enforcement for Automated Response to Ransomware Alerts
+Authors: Cipriaso, James Kielson S.; Quiñones, Angelo; Ranigo, Gerome David; Rosales, Kean Louis R.
+Adviser: Mr. Jonathan Mantua
+Program: BS Computer Science, College of Computer Studies, De La Salle University
+
+Hard Constraints (from the department's defense guidelines)
+Total time budget: max 30 minutes (excluding live demo). Design slide count/density so a presenter can realistically stay within these per-section minutes:
+1. Problem Statement — 1–2 min
+2. Objectives — 1 min
+3. Scope and Limitations — 2–3 min
+4. Framework and System Design — 2–3 min
+5. System Implementation — 3–5 min
+6. Results and Analysis — 15–20 min (this is the heart of the deck; give it the most slides and the most visual/data detail)
+7. Conclusion and Recommendation — 2–3 min
+(Live/Actual Demo of the final system — 10–15 min, handled outside the slides, but include one "Live Demo" divider slide as a placeholder)
+
+Explicit note from the adviser: "Focus on the Results and Analysis." Weight the deck accordingly — that section should feel like the most thorough, data-dense part of the presentation, not a quick recap.
+
+--------------------------------------------------------------------------------
+CONTENT TO USE (PULLED DIRECTLY FROM THESIS CODEBASE & TECHNICAL MANUALS)
+--------------------------------------------------------------------------------
+
+1. Problem Statement
+
+• Evolving Ransomware Threat Landscape: Modern ransomware strains (WannaCry, NotPetya, BadRabbit) exploit fast lateral propagation (SMB/EternalBlue, PsExec, WMI) and rapid encryption cycles (MFT/MBR overwrites, Salsa20, RSA/RC4), making manual Security Operations Center (SOC) containment too slow.
+• Limitations of Current SDN Defense Literature: Prior SDN-based ransomware defense research (e.g., Cabaj & Mazurczyk 2016, Akbanov et al. 2019, Maimó et al. 2019) focuses heavily on hardcoded controller logic or single-purpose network detectors. They lack extensibility, tool-agnostic orchestration, and portable playbooks.
+• Industry Vendor Lock-in & Closed Architectures: Commercial SOAR (Security Orchestration, Automation, and Response) tools are proprietary, expensive, and tightly coupled to specific EDR/SIEM ecosystems.
+• The Solution Need: An open, modular, developer-friendly SOAR SDK and decoupled SDN-enforcement middleware that enables security engineers to rapidly author custom detection/action modules and execute YAML "Policy as Code" workflows.
+
+2. Research Objectives
+
+General Objective:
+Develop a Software Development Kit (SDK) and an event-driven SDN security platform that enables developers to build pluggable security modules, orchestrate YAML-based response playbooks, and isolate infected hosts via SDN flow modification upon ransomware detection.
+
+Specific Objectives:
+1. Ransomware TTP Analysis: Analyze infection, propagation (EternalBlue SMB, PsExec, WMI, SVCCTL/DCERPC), and payload execution patterns across public ransomware strains (WannaCry, NotPetya, BadRabbit).
+2. Extensible SDK Development: Design a Java-based SDK (`nis-thesis-sdk`) providing standardized module contracts (`PluggableModule`), event abstractions (`Event<T>`), and a messaging gateway (`CoreSystemApi`).
+3. Decoupled Middleware Platform: Deploy an event-driven architecture featuring RabbitMQ AMQP messaging, Module Registry & Lifecycle Manager, Workflow Engine, and PostgreSQL ThreatContextStore.
+4. YAML Policy Engine (Policy as Code): Implement a OASIS CACAO v2.0-aligned Workflow Engine supporting trigger matching, dynamic variable substitution (`{{ trigger.payload.* }}`), conditional branching, and command emission.
+5. Automated SDN Isolation: Build pluggable Action Modules leveraging OpenDaylight (ODL) RESTCONF APIs to push reactive OpenFlow rules to isolate compromised network ports/VLANs.
+6. Error-Handling & Fail-Safety: Incorporate heartbeat monitoring, auto-requeueing/dead-lettering (QoS=10 retry handling), and dual module hosting models (embedded `SdkModuleHost` vs. standalone process UDM).
+7. Quantitative Performance & Accuracy Evaluation: Measure detection F1 score, Suricata alert latency, RabbitMQ routing overhead, Workflow Engine evaluation delay, and OpenDaylight flow rule enforcement latency across 10 trials per strain.
+
+3. Scope and Limitations
+
+Scope:
+• Ransomware Target Scope: 3 public ransomware strains evaluated in depth:
+  - WannaCry (MS17-010 / EternalBlue SMB v1 exploit, double-pulsar backdoor).
+  - NotPetya (PsExec, WMI, EternalBlue, lateral SMB propagation, MBR wipe).
+  - BadRabbit (Mimikatz credential dumping, SMB/SVCCTL, DCERPC execution, MFT encryption).
+• Platform Scope: Detection and mitigation are orchestrated strictly within the middleware platform and SDN Data Plane (OpenDaylight OpenFlow switches).
+• SDK Scope: Comprehensive Java SDK (`nis-thesis-sdk`) containing lifecycle interfaces, typed event models (`HostAlertData`, `NidsAlertData`, `MitigationCommandData`), documentation, and developer utility wrappers (`ModuleHelper`).
+• Dual Hosting Paradigm: Supports both Embedded SDK Modules (hosted inside `ModuleRegistryLifecycleManager`) and Standalone User-Defined Modules (UDMs).
+• Testing Environment: Isolated, air-gapped virtual network topology with dedicated Linux/Windows VMs, Suricata NIDS mirror ports, RabbitMQ message broker, OpenDaylight controller, and Mininet SDN switches.
+• Quality Attribute Testing: Evaluated against performance (end-to-end latency), accuracy (confusion matrix F1 score), extensibility (SDK module integration ease), security, and reliability.
+
+Limitations:
+• Real-World Enterprise Topologies: Testing conducted in controlled star topologies; complex hierarchical tree topologies are reserved for future work.
+• Host-Level Kernel Drivers: Response is focused on SDN network-layer flow isolation (OpenFlow) rather than host-kernel process killing.
+• Encrypted Payload Deep Packet Inspection: Suricata NIDS visibility relies on unencrypted network handshake signatures or mirrored traffic points.
+
+4. Framework and System Design
+
+Architecture Overview: 3-Plane SDN Architecture (Application Plane, Control Plane, Data Plane) with Event-Driven Bus Architecture.
+
+1. Application Plane:
+   - Security Modules (Suricata NIDS integration, Zeek UDM, Wazuh EDR, OpenDaylight Response Module).
+   - Operator Dashboard Webapp (Node.js/Express backend + React frontend) streaming logs and queue metrics via WebSockets.
+2. Control Plane (Middleware Core):
+   - Communication Fabric: RabbitMQ AMQP message broker managing decoupled queues (`alerts_queue`, `workflow_queue`, `command_queue`, `query_response_queue`).
+   - Module Registry & Lifecycle Manager: Module registration, capabilities mapping, liveness heartbeats, and embedded `SdkModuleHost`.
+   - Workflow Engine: YAML playbook parser, trigger evaluator, template variable populator, and `INITIATE_MITIGATION` command generator.
+   - ThreatContextStore: Durable PostgreSQL storage utilizing JSONB schemas for schema-agnostic alert persistence and asynchronous query responses.
+   - OpenDaylight Controller: Manages OpenFlow switches via RESTCONF API (`/restconf/config/opendaylight-inventory:nodes/...`).
+3. Data Plane:
+   - OpenFlow-enabled Virtual Switches (Mininet/OVS) routing host traffic and mirroring NIDS inspection streams.
+
+Data Lifecycle & Canonical JSON Envelope:
+Every system interaction follows a strictly typed JSON envelope across RabbitMQ:
+```json
+{
+  "message_type": "alert | registration | heartbeat | workflow_command | query | query_response",
+  "event_id": "uuid-v4",
+  "timestamp": "ISO-8601 (e.g., 2026-07-21T13:03:04+08:00)",
+  "event_type": "alerts.nids.suricata | INITIATE_MITIGATION",
+  "source_module": "SuricataModule | WorkflowEngine",
+  "payload": { ... }
+}
+```
+
+SDK Programming Model (`nis-thesis-sdk`):
+• `PluggableModule`: Standard startup/shutdown lifecycle interface (`initialize(CoreSystemApi api)`, `shutdown()`).
+• `CoreSystemApi`: Decoupled publish/subscribe bus abstraction (`publishEvent(Event<T>)`, `subscribeToEvent(eventType, handler)`).
+• `Event<T>`: Generic, strongly-typed envelope wrapping domain models (`NidsAlertData`, `MitigationCommandData`).
+• `ModuleHelper`: Convenience helper for standardized logging and message building.
+
+YAML "Policy as Code" Specification (OASIS CACAO Aligned):
+```yaml
+name: ransomware_auto_mitigation
+version: 1.0
+trigger:
+  event_type: alerts.nids.suricata
+  conditions:
+    severity: high
+    category: ransomware_exploit
+steps:
+  - name: isolate_compromised_host
+    action:
+      event:
+        type: INITIATE_MITIGATION
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "Automated response: Suricata ransomware alert"
+```
+
+5. System Implementation
+
+Hardware & Software Environment:
+• Workstation Hardware: AMD Ryzen 7 5700X (8 cores / 16 threads), 32 GB DDR4 RAM.
+• Middleware Stack: Java 17 (Maven multi-module), PostgreSQL 15 (JSONB storage), RabbitMQ 3.12 (AMQP broker with `basicQos(10)` concurrent prefetching).
+• SDN & Security Stack: OpenDaylight (Helium/Carbon release), Suricata 6.0 NIDS, Mininet 2.3.0 OpenFlow switches.
+• Operator Interface: Node.js/Express backend + React 18 frontend dashboard streaming service logs, module heartbeats, and workflow status in real time.
+
+Component Breakdown:
+1. `nis-thesis-sdk`: Multi-module Maven artifact providing core JAR references across all modules.
+2. `ModuleRegistryLifecycleManager`: Listens on `registration_queue` and `heartbeat_queue`. Tracks active modules in memory and PostgreSQL. Routes `workflow_command` messages to matching module capabilities.
+3. `WorkflowEngine`: Parses YAML files from `/workflows`. Subscribes to trigger topics. Evaluates triggers against alert payloads, performs variable interpolation, and publishes action commands.
+4. `ThreatContextStore`: Subscribes to `alerts_queue`. Uses PostgreSQL `wazuh_alerts` / `nids_alerts` tables with JSONB fields. Includes dead-lettering / 2-try retry handling to prevent queue blockage.
+5. `user-defined-modules`:
+   - `SuricataModule`: Reads Suricata `eve.json` socket/file, transforms rules into `alerts.nids.suricata`, publishes via SDK.
+   - `OpenDaylightModule`: Registers capability `INITIATE_MITIGATION`. Listens for commands, converts IP/MAC targets into OpenFlow RESTCONF drop flow rules (Priority 50000).
+
+6. Results and Analysis (PRIORITIZE THIS SECTION — MOST SLIDES & MOST DETAIL)
+
+Detection Accuracy & Confusion Matrix:
+Across 10 benchmark trials for each of the 3 ransomware variants (30 trials total), the system was evaluated for detection and mitigation accuracy.
+• True Positives (TP): Ransomware attack executed and successfully isolated via SDN.
+• False Positives (FP): Benign traffic flagged as ransomware (0 occurrences across all runs).
+• False Negatives (FN): Ransomware attack missed by detection/workflow engine (0 occurrences).
+• True Negatives (TN): Benign baseline runs left unblocked (evaluated separately).
+
+Confusion Matrix Summary Table:
++-------------------+----+----+----+----+-----------+-----------+------------+
+| Ransomware Strain | TP | FP | TN | FN | Precision |  Recall   |  F1 Score  |
++-------------------+----+----+----+----+-----------+-----------+------------+
+| WannaCry          | 10 |  0 |  0 |  0 |   100.0%  |   100.0%  |    1.00    |
+| NotPetya          | 10 |  0 |  0 |  0 |   100.0%  |   100.0%  |    1.00    |
+| BadRabbit         | 10 |  0 |  0 |  0 |   100.0%  |   100.0%  |    1.00    |
++-------------------+----+----+----+----+-----------+-----------+------------+
+
+Quantitative Latency Breakdown (Suricata Alert -> RabbitMQ -> Workflow Engine -> OpenDaylight Enforcement):
+
+1. WannaCry Evaluation (10 Trials):
+   - Target Vectors: MS17-010 EternalBlue SMBv1 exploit, DoublePulsar payload.
+   - Average End-to-End Latency: 1.399 s.
+   - Latency Range: 0.78 s (fastest) to 2.96 s (slowest).
+   - Operational Note: 2 trials required a manual retry due to test harness state clearance, achieving 100% mitigation success on re-execution.
+
+2. NotPetya Evaluation (10 Trials):
+   - Target Vectors: EternalBlue SMB exploit, PsExec/WMI credential propagation, MBR overwrite.
+   - Average End-to-End Latency: ~1.45 s.
+   - F1 Score: 1.00 across all 10 trials.
+   - Latency Profile: Rapid Suricata signature match on initial SMB exploit handshake followed by instantaneous flow rule installation.
+
+3. BadRabbit Evaluation (10 Trials):
+   - Target Vectors: Mimikatz credential harvesting, SMB/SVCCTL service creation, DCERPC execution.
+   - Average End-to-End Latency: ~2.12 s.
+   - F1 Score: 1.00 overall.
+   - Operational Outlier Analysis: 1 trial exhibited a significantly higher latency spike (~4.8 s). Post-test analysis revealed Suricata packet inspection delays during staged SVCCTL/DCERPC RPC calls, indicating detection-threshold sensitivity during non-exploit-based RPC administrative calls.
+
+Comparative Evaluation Against Literature Systems:
+A key differentiator of this thesis is trading a minor amount of sub-second raw network latency for massive gains in modularity, policy portability, and multi-tool orchestration.
+
+Comparative Matrix Table:
++------------------------------------+-----------------------+-----------------------+-----------------------+---------------------------------------+
+| Metric / Feature                   | Cabaj & Mazurczyk     | Akbanov et al.        | Maimó et al.          | Proposed SOAR SDK Platform            |
+|                                    | (2016)                | (2019)                | (2019)                | (This Study)                          |
++------------------------------------+-----------------------+-----------------------+-----------------------+---------------------------------------+
+| Primary Target Focus               | CryptoWall            | Ransomware (General)  | Ransomware / Botnets  | WannaCry, NotPetya, BadRabbit         |
+| Detection Mechanism                | DNS / HTTP Inspection | SDN Flow Statistics   | ML / Deep Learning    | Suricata NIDS + Extensible SDK        |
+| Architecture Type                  | Tightly-Coupled SDN   | Tightly-Coupled SDN   | Monolithic SDN ML     | Decoupled 3-Plane SOAR Middleware     |
+| Extensibility                      | None (Hardcoded)      | Low (Controller App)  | Medium (ML Retrain)   | High (Pluggable SDK + AMQP Bus)       |
+| Average Isolation Latency          | ~0.15 s (150 ms)      | ~0.45 s (450 ms)      | ~0.80 s (800 ms)      | ~1.40 s – 2.10 s                      |
+| Policy Portability                 | None                  | None                  | None                  | High (YAML OASIS CACAO Playbooks)     |
+| Multi-Tool Orchestration           | No (Single Switch/App)| No (SDN App Only)     | No (ML Engine Only)   | Yes (Suricata, ODL, RabbitMQ, Wazuh) |
+| Developer SDK Provided             | No                    | No                    | No                    | Yes (`nis-thesis-sdk`)                |
++------------------------------------+-----------------------+-----------------------+-----------------------+---------------------------------------+
+
+Architectural Trade-Off Analysis:
+• Sub-Second vs. Decoupled Trade-off: Prior literature systems achieve sub-second isolation (150ms–800ms) by embedding detection logic directly inside controller modules or switch memory. However, they are single-purpose and cannot adapt to new tools without modifying core controller code.
+• Platform Versatility: This study's platform introduces ~1 second of middleware/AMQP message bus latency, but gains tool-agnostic orchestration, zero-downtime hot-swapping of modules, human-readable YAML policy editing, and full developer SDK support.
+
+7. Conclusion and Recommendation
+
+Conclusion:
+1. Successful Defense Architecture: The study successfully designed, built, and validated an Extensible SOAR SDK with SDN Enforcement, proving that ransomware propagation can be automatically contained at the network layer using decoupled middleware.
+2. High Detection & Isolation Reliability: Achieved a 1.00 F1 score across 30 empirical trials (WannaCry, NotPetya, BadRabbit) with an average host isolation latency of 1.4s–2.1s.
+3. Policy as Code Viability: Demonstrated that YAML-basedplaybooks aligned with OASIS CACAO provide effective, human-readable security orchestration without compromising execution speed.
+4. Key Dependency: Effectiveness relies heavily on initial detection module speed; while exploit-based vectors (EternalBlue) trigger instant isolation, RPC/staged vectors (BadRabbit) highlight the need for multi-source correlation.
+
+Recommendations for Future Work:
+1. Hierarchical Enterprise Topologies: Extend testing from single-switch star topologies to multi-layer hierarchical tree/mesh enterprise topologies to evaluate isolation flow rule propagation and switch memory utilization.
+2. Middleware "Fast-Path" Circuit Breaker: Implement a high-priority "fast-path" bypass channel in RabbitMQ for critical-severity alerts (e.g., immediate host isolation), bypassing full YAML workflow parsing to reduce latency down to sub-500ms.
+3. Host-Level Kernel EDR Integration: Expand the SDK action module library to include EDR process termination and file-system freeze mechanisms alongside SDN network port isolation.
+4. Dynamic ML Detection Modules: Develop an SDK-compliant Machine Learning detection module capable of analyzing encrypted traffic entropy and flow stats to catch zero-day ransomware strains lacking NIDS signatures.
+
+--------------------------------------------------------------------------------
+DESIGN & FORMATTING INSTRUCTIONS FOR THE AI
+--------------------------------------------------------------------------------
+1. Deck Structure & Length: Generate roughly 22–26 slides total. Ensure Results and Analysis comprises ~40–50% of the entire slide count.
+2. Color Palette: Deep Academic/Tech theme — Dark Forest Green (`#0F382C` or `#1B4332`), Emerald accent (`#2D6A4F` / `#52B788`), Crisp White (`#FFFFFF`), and Light Gray background (`#F8F9FA`).
+3. Typography: Clean sans-serif fonts (e.g., Inter, Montserrat, or Roboto).
+4. Content Density: Use bullet fragments, bold key metrics, clear data tables, and latency bar/line chart representations rather than dense textual paragraphs.
+5. Key Visual Elements to Include:
+   - Slide for System Architecture (Application/Control/Data planes).
+   - Slide for Data Lifecycle / Canonical JSON Envelope structure.
+   - Slide for SDK Code Architecture (`PluggableModule` & `CoreSystemApi`).
+   - Visual Tables for per-variant Confusion Matrices and Latencies.
+   - Full Visual Comparative Evaluation Matrix (Table comparing Cabaj, Akbanov, Maimó, and This Study).
+   - Placeholder "Live Demo" transition slide before Conclusion.

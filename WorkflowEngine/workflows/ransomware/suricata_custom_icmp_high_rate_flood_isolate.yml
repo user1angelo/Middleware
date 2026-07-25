@@ -1,0 +1,22 @@
+name: "Suricata Custom ICMP High-Rate Flood -> SDN Isolation"
+version: 1.0
+description: >
+  Isolates a suspicious source host when Suricata detects high-rate ICMP flood behavior.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  condition: "{{ trigger.payload.signature contains 'CUSTOM FLOOD ICMP High-Rate Flood Detected' }}"
+
+steps:
+  - name: "Isolate ICMP high-rate flood offender"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "Custom Suricata ICMP high-rate flood signature detected from {{ trigger.payload.source_ip }}. Isolating suspicious machine."
+          source_event_id: "{{ trigger.event_id }}"
+          signature: "{{ trigger.payload.signature }}"
+          signature_id: "{{ trigger.payload.signature_id }}"

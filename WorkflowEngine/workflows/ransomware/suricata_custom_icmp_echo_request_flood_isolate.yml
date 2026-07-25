@@ -1,0 +1,22 @@
+name: "Suricata Custom ICMP Echo Request Flood -> SDN Isolation"
+version: 1.0
+description: >
+  Isolates a suspicious source host when Suricata detects repeated ICMP echo-request flood behavior.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  condition: "{{ trigger.payload.signature contains 'CUSTOM FLOOD ICMP Echo Request Flood Detected' }}"
+
+steps:
+  - name: "Isolate ICMP echo flood offender"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "Custom Suricata ICMP echo-request flood signature detected from {{ trigger.payload.source_ip }}. Isolating suspicious machine."
+          source_event_id: "{{ trigger.event_id }}"
+          signature: "{{ trigger.payload.signature }}"
+          signature_id: "{{ trigger.payload.signature_id }}"

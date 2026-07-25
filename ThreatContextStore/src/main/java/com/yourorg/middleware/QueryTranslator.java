@@ -23,7 +23,7 @@ public class QueryTranslator {
         String select = payload.optString("select", "*");
         
         // Build FROM clause
-        String from = payload.optString("from", "wazuh_alerts");
+        String from = payload.optString("from", "alerts");
         
         // Build WHERE clause from filters
         StringBuilder whereClause = new StringBuilder();

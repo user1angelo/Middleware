@@ -1,0 +1,23 @@
+name: "Maltrail High-Severity Ransomware Trail -> SDN Isolation"
+version: 1.0
+description: >
+  Isolates a host when Maltrail flags high-severity network activity matching
+  a known ransomware-associated threat indicator (trail).
+
+trigger:
+  event_type: "alerts.network.maltrail"
+  condition: "{{ trigger.payload.severity == 'high' and trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Isolate host flagged by Maltrail ransomware trail"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "Maltrail flagged {{ trigger.payload.source_ip }} against ransomware-associated trail '{{ trigger.payload.trail }}' ({{ trigger.payload.signature }}). Isolating host."
+          source_event_id: "{{ trigger.event_id }}"
+          signature: "{{ trigger.payload.signature }}"
+          trail: "{{ trigger.payload.trail }}"

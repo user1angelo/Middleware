@@ -1,0 +1,22 @@
+name: "Suricata Custom UDP Volumetric Abuse -> SDN Isolation"
+version: 1.0
+description: >
+  Isolates a suspicious source host when Suricata rule 9000010 detects UDP volumetric abuse.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  condition: "{{ trigger.payload.signature_id == '9000010' }}"
+
+steps:
+  - name: "Isolate UDP volumetric offender"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "Custom Suricata UDP volumetric abuse rule 9000010 detected from {{ trigger.payload.source_ip }}. Isolating suspicious machine."
+          source_event_id: "{{ trigger.event_id }}"
+          signature: "{{ trigger.payload.signature }}"
+          signature_id: "{{ trigger.payload.signature_id }}"

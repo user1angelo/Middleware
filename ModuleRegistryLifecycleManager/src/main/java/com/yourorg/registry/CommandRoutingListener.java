@@ -5,6 +5,8 @@ import java.nio.charset.StandardCharsets;
 
 import org.json.JSONObject;
 
+import com.nis1.thesis.sdk.telemetry.StageTimer;
+
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
@@ -98,8 +100,11 @@ public class CommandRoutingListener implements Runnable {
      * Route command to appropriate UDM
      */
     private void routeCommand(String message, Channel channel, String mitigationEventsQueue) throws IOException {
+        long stageStartMs = System.currentTimeMillis();
+        String traceId = "unknown";
         try {
             JSONObject json = new JSONObject(message);
+            traceId = json.optString("trace_id", "unknown");
             String messageType = json.optString("message_type", "unknown");
             
             // Only process workflow commands
@@ -185,6 +190,8 @@ public class CommandRoutingListener implements Runnable {
         } catch (Exception e) {
             System.err.println("❌ Failed to route command: " + e.getMessage());
             throw e;
+        } finally {
+            StageTimer.record(traceId, "registry_route_dispatch", stageStartMs, System.currentTimeMillis());
         }
     }
     

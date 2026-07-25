@@ -3,6 +3,8 @@ package com.yourorg.workflow;
 import com.rabbitmq.client.*;
 import org.json.JSONObject;
 
+import com.nis1.thesis.sdk.telemetry.StageTimer;
+
 import java.util.List;
 
 /**
@@ -63,11 +65,13 @@ public class WorkflowQueueListener {
             System.out.println("📨 Alert #" + messageCounter + " received (deliveryTag=" + deliveryTag + ", redelivered=" + redelivered + ")");
             
             try {
+                long consumeDeserializeStartMs = System.currentTimeMillis();
                 String message = new String(delivery.getBody(), "UTF-8");
                 JSONObject alert = new JSONObject(message);
-                
+
                 String eventId = alert.optString("event_id", "unknown");
                 String messageType = alert.optString("message_type", "unknown");
+                StageTimer.record(eventId, "consume_deserialize", consumeDeserializeStartMs, System.currentTimeMillis());
                 
                 System.out.println("🏷️  Event ID: " + eventId);
                 System.out.println("🔖 Message Type: " + messageType);
@@ -97,8 +101,10 @@ public class WorkflowQueueListener {
                 // Load workflows
                 System.out.println("\n📂 Loading workflows...");
                 String workflowsDir = ConfigLoader.getWorkflowsDirectory();
+                StageTimer.start(eventId, "workflow_load");
                 List<Workflow> allWorkflows = workflowLoader.loadWorkflows(workflowsDir);
-                
+                StageTimer.stop(eventId, "workflow_load");
+
                 if (allWorkflows.isEmpty()) {
                     System.err.println("⚠️  No workflows found!");
                     channel.basicAck(deliveryTag, false);
@@ -120,8 +126,10 @@ public class WorkflowQueueListener {
                 
                 // Find and execute specific matching workflows
                 System.out.println("\n🔍 Matching against specific workflows...");
+                StageTimer.start(eventId, "policy_match");
                 List<Workflow> matchingWorkflows = workflowMatcher.findMatchingWorkflows(alert, allWorkflows);
-                
+                StageTimer.stop(eventId, "policy_match");
+
                 // Remove general workflow from matches (already executed)
                 if (generalWorkflow != null) {
                     matchingWorkflows.remove(generalWorkflow);
@@ -138,26 +146,6 @@ public class WorkflowQueueListener {
                 }
                 
                 // Acknowledge message
-                long processingEndTime = System.currentTimeMillis();
-                long processingTimeStr = processingEndTime - System.currentTimeMillis(); // Just for delta, but we want Total Turnaround Time
-
-                // Calculate Total Containment Time if timestamp is available
-                if (alert.has("timestamp")) {
-                    try {
-                        String alertTimeStr = alert.getString("timestamp");
-                        java.time.Instant alertTime = java.time.Instant.parse(alertTimeStr);
-                        long alertTimeMillis = alertTime.toEpochMilli();
-                        long totalContainmentTime = processingEndTime - alertTimeMillis;
-                        
-                        System.out.println("⏱️  Containment Performance Metrics:");
-                        System.out.println("   - Alert Generation: " + alertTimeStr);
-                        System.out.println("   - Action Executed:  " + java.time.Instant.now().toString());
-                        System.out.println("   - TOTAL TIME:       " + totalContainmentTime + " ms");
-                    } catch (Exception e) {
-                        System.out.println("⚠️  Could not calculate total time: " + e.getMessage());
-                    }
-                }
-
                 channel.basicAck(deliveryTag, false);
                 System.out.println("\n✅ ACK sent for alert #" + messageCounter);
                 System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");

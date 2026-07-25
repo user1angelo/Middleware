@@ -4,6 +4,8 @@ import com.rabbitmq.client.Channel;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import com.nis1.thesis.sdk.telemetry.StageTimer;
+
 import java.io.IOException;
 
 import java.time.ZonedDateTime;
@@ -114,6 +116,13 @@ public class WorkflowExecutor {
             command.put("timestamp", ZonedDateTime.now(MANILA_ZONE).format(ISO_FORMATTER));
             command.put("source_module", "WorkflowEngine");
 
+            // Propagate the originating alert's trace ID so downstream stages (e.g.
+            // CommandRoutingListener's registry_route_dispatch) can be joined back to
+            // this alert's consume_deserialize/workflow_load/policy_match/command_dispatch
+            // StageTimer rows. The command's own "event_id" above is a freshly generated
+            // UUID and cannot be used for that join.
+            command.put("trace_id", alert.optString("event_id", "unknown"));
+
             // Build payload from event data with template variable substitution
             JSONObject payload = new JSONObject();
             if (event.getData() != null) {
@@ -158,9 +167,12 @@ public class WorkflowExecutor {
             command.put("payload", payload);
 
             // Publish to RabbitMQ
+            String traceId = alert.optString("event_id", "unknown");
+            StageTimer.start(traceId, "command_dispatch");
             String queueName = ConfigLoader.getWorkflowResponseQueueName();
             channel.queueDeclare(queueName, true, false, false, null);
             channel.basicPublish("", queueName, null, command.toString().getBytes("UTF-8"));
+            StageTimer.stop(traceId, "command_dispatch");
 
             System.out.println("      📤 Published command to " + queueName + ": " + command.getString("message_type"));
 

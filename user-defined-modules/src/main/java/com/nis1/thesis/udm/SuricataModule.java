@@ -365,9 +365,10 @@ public class SuricataModule {
 
     /**
      * Parses a single line from Suricata eve.json log file
-     * and publishes standardized alert if it's an alert event
+     * and publishes standardized alert if it's an alert event.
+     * Package-private (not private) so it can be unit tested directly without reflection.
      */
-    private static void parseEveJsonLine(String jsonLine, Channel channel) {
+    static void parseEveJsonLine(String jsonLine, Channel channel) {
         try {
             // Validate JSON structure before parsing
             if (!jsonLine.trim().startsWith("{") || !jsonLine.trim().endsWith("}")) {

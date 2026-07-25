@@ -75,6 +75,10 @@ cd ../ThreatContextStore
 javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 
 # 3. Build WorkflowEngine (javac-based)
+# WorkflowEngine now uses StageTimer from nis-thesis-sdk for benchmark instrumentation,
+# so the SDK jar built in step 1 must be present in WorkflowEngine/lib/ first:
+#   cp nis-thesis-sdk/target/nis-thesis-sdk-1.0-SNAPSHOT.jar WorkflowEngine/lib/
+# The "lib/*" wildcard below already picks it up automatically once it's copied there.
 cd ../WorkflowEngine
 javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java
 
@@ -88,8 +92,13 @@ mvn clean install
 ## 🧪 Testing
 
 ### Running Unit Tests
-Each module has its own test suite.
-- **User-defined modules**: `mvn test` in `user-defined-modules`
+No automated unit test suite (JUnit or otherwise) exists yet in any module. Verification today
+relies on the manual tester utilities in the repo:
+- `WorkflowEngine/WorkflowTester.java`
+- `ThreatContextStoreTester/TCSTester.java`
+- `ModuleRegistryLifecycleManager/UDMTester.java`
+
+along with the System Verification steps below.
 
 ### System Verification
 Use the `ThreatContextStoreTester` to generate synthetic alerts:

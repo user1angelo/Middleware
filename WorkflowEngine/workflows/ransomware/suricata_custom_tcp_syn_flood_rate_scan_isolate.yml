@@ -1,0 +1,22 @@
+name: "Suricata Custom TCP SYN Flood-Rate Scan -> SDN Isolation"
+version: 1.0
+description: >
+  Isolates a suspicious source host when Suricata rule 9000008 detects high-rate TCP SYN scan behavior.
+
+trigger:
+  event_type: "alerts.network.suricata"
+  condition: "{{ trigger.payload.signature_id == '9000008' }}"
+
+steps:
+  - name: "Isolate TCP SYN flood-rate scanner"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "INITIATE_MITIGATION"
+        data:
+          targetHost: "{{ trigger.payload.source_ip }}"
+          action: "ISOLATE_VLAN"
+          justification: "Custom Suricata TCP SYN flood-rate scan rule 9000008 detected from {{ trigger.payload.source_ip }}. Isolating suspicious machine."
+          source_event_id: "{{ trigger.event_id }}"
+          signature: "{{ trigger.payload.signature }}"
+          signature_id: "{{ trigger.payload.signature_id }}"
