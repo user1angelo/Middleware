@@ -1,0 +1,16 @@
+{
+  "message_type": "alert",
+  "event_id": "dry-run-maltrail-001",
+  "timestamp": "2026-07-29T10:00:00Z",
+  "event_type": "alerts.network.maltrail",
+  "source_module": "Maltrail UDM",
+  "payload": {
+    "severity": "high",
+    "alert_type": "ransomware",
+    "category": "ransomware",
+    "source_ip": "10.0.0.55",
+    "destination_ip": "203.0.113.9",
+    "signature": "ransomware",
+    "trail": "203.0.113.9"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "message_type": "alert",
+  "event_id": "dry-run-sysmon-001",
+  "timestamp": "2026-07-29T10:00:00Z",
+  "event_type": "alerts.host.sysmon",
+  "source_module": "Sysmon UDM",
+  "payload": {
+    "severity": "critical",
+    "alert_type": "ransomware",
+    "computer": "WIN-HOST01",
+    "user": "WIN-HOST01-Administrator",
+    "signature": "Ransomware pre-encryption command detected: vssadmin delete shadows /all /quiet"
+  }
+}

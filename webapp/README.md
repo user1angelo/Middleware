@@ -11,6 +11,10 @@ A minimalist web dashboard for managing and monitoring the Middleware system.
 - **Configuration Editor**: Edit config.properties files for each program
 - **Module Health**: Monitor status and heartbeats of user-defined modules
 - **System Testing**: Run TCSTester to validate the complete pipeline
+- **SDK Documentation** (`/sdk`): In-app reference for building user-defined modules - covers the
+  embedded (`PluggableModule`) and standalone-process integration patterns, the `CoreSystemApi`/
+  `Event<T>`/`ModuleHelper` reference, and worked examples. See `/sdk`, `/sdk/core-api`, and
+  `/sdk/patterns`.
 
 ## Architecture
 
@@ -181,7 +185,11 @@ webapp/
 │   │   │   ├── Workflows.js   # Workflow editor
 │   │   │   ├── Configuration.js # Config editor
 │   │   │   ├── Modules.js     # Module health
-│   │   │   └── Testing.js     # Test runner
+│   │   │   ├── Testing.js     # Test runner
+│   │   │   ├── SdkDocs.js     # SDK docs shell (sub-nav + routing for the three below)
+│   │   │   ├── SdkOverview.js # SDK intro, getting-started walkthrough
+│   │   │   ├── SdkCoreApi.js  # CoreSystemApi/PluggableModule/Event<T>/ModuleHelper reference
+│   │   │   └── SdkPatterns.js # Reactive/proactive/correlation/standalone-process patterns
 │   │   └── services/
 │   │       └── api.js         # API client
 │   └── package.json

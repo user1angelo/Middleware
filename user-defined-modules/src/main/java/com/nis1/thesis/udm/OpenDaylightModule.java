@@ -15,6 +15,7 @@ import com.nis1.thesis.sdk.CoreSystemApi;
 import com.nis1.thesis.sdk.Event;
 import com.nis1.thesis.sdk.MitigationAction;
 import com.nis1.thesis.sdk.MitigationCommandData;
+import com.nis1.thesis.sdk.MitigationParameters;
 import com.nis1.thesis.sdk.ModuleHelper;
 import com.nis1.thesis.sdk.PluggableModule;
 import com.nis1.thesis.udm.services.NetworkScannerService;
@@ -111,11 +112,13 @@ public class OpenDaylightModule implements PluggableModule {
             MitigationCommandData command = (MitigationCommandData) data;
             String targetHost = command.getTargetHost();
             MitigationAction action = command.getAction();
-            JSONObject metadata = parseAdditionalParameters(command.getAdditionalParameters());
-            String targetMac = normalizeMac(metadata.optString("mac_address", null));
-            String mitigationId = normalizeBlank(metadata.optString("mitigation_id", null));
-            JSONObject policyJson = metadata.optJSONObject("quarantine_policy");
-            OpenDaylightClient.QuarantinePolicyOptions policyOptions = buildPolicyOptions(policyJson);
+            MitigationParameters metadata = command.getAdditionalParameters();
+            if (metadata == null) {
+                metadata = new MitigationParameters();
+            }
+            String targetMac = normalizeMac(metadata.getMacAddress());
+            String mitigationId = normalizeBlank(metadata.getMitigationId());
+            OpenDaylightClient.QuarantinePolicyOptions policyOptions = buildPolicyOptions(metadata.getQuarantinePolicy());
 
             helper.log(getName(), "INFO", "Received mitigation request: " + action + " for " + targetHost);
             helper.log(getName(), "DEBUG", "Full command data: " + command.toString()); // Assuming toString() is
@@ -124,9 +127,9 @@ public class OpenDaylightModule implements PluggableModule {
 
             boolean success = false;
             long appliedTimeMillis = System.currentTimeMillis();
-            
+
             String justification = command.getJustification();
-            String severity = metadata.optString("severity", "medium").toLowerCase();
+            String severity = (metadata.getSeverity() != null ? metadata.getSeverity() : "medium").toLowerCase();
             
             if (justification != null && (justification.contains("ARP") || justification.contains("arp") || justification.contains("spoof"))) {
                 helper.log(getName(), "INFO", "ARP Spoofing mitigation triggered. Checking operational inventory for conflicting IP-MAC bindings...");
@@ -167,7 +170,7 @@ public class OpenDaylightModule implements PluggableModule {
                 helper.log(getName(), "WARN", "Action " + action + " not supported by ODL module yet.");
             }
 
-            logTelemetryBenchmark(metadata, appliedTimeMillis, "SDN Isolation Rules Applied");
+            logTelemetryBenchmark(metadata.getTelemetry(), appliedTimeMillis, "SDN Isolation Rules Applied");
 
         } catch (Exception e) {
             helper.log(getName(), "ERROR", "Error handling mitigation: " + e.getMessage());
@@ -189,10 +192,13 @@ public class OpenDaylightModule implements PluggableModule {
 
             MitigationCommandData command = (MitigationCommandData) data;
             String targetHost = command.getTargetHost();
-            JSONObject metadata = parseAdditionalParameters(command.getAdditionalParameters());
-            String targetMac = normalizeMac(metadata.optString("mac_address", null));
-            String mitigationId = normalizeBlank(metadata.optString("mitigation_id", null));
-            String rollbackReason = normalizeBlank(metadata.optString("rollback_reason", null));
+            MitigationParameters metadata = command.getAdditionalParameters();
+            if (metadata == null) {
+                metadata = new MitigationParameters();
+            }
+            String targetMac = normalizeMac(metadata.getMacAddress());
+            String mitigationId = normalizeBlank(metadata.getMitigationId());
+            String rollbackReason = normalizeBlank(metadata.getRollbackReason());
 
             helper.log(getName(), "INFO", "Received remove mitigation request for " + targetHost);
             if (rollbackReason != null) {
@@ -389,7 +395,10 @@ public class OpenDaylightModule implements PluggableModule {
             } else {
                 helper.log(getName(), "ERROR", "❌ Failed to install proactive policy: " + policyName);
             }
-            logTelemetryBenchmark(policyData, System.currentTimeMillis(), "SDN Policy Rules Applied");
+            Map<String, Object> policyTelemetry = policyData.has("telemetry")
+                    ? policyData.getJSONObject("telemetry").toMap()
+                    : null;
+            logTelemetryBenchmark(policyTelemetry, System.currentTimeMillis(), "SDN Policy Rules Applied");
 
         } catch (Exception e) {
             helper.log(getName(), "ERROR", "Error installing proactive policy: " + e.getMessage());
@@ -543,52 +552,39 @@ public class OpenDaylightModule implements PluggableModule {
         }
     }
 
-    private JSONObject parseAdditionalParameters(String additionalParameters) {
-        if (additionalParameters == null || additionalParameters.isBlank()) {
-            return new JSONObject();
-        }
-        try {
-            return new JSONObject(additionalParameters);
-        } catch (Exception ex) {
-            helper.log(getName(), "WARN", "Failed to parse mitigation additional parameters: " + ex.getMessage());
-            return new JSONObject();
-        }
-    }
-
-    private OpenDaylightClient.QuarantinePolicyOptions buildPolicyOptions(JSONObject policyJson) {
+    private OpenDaylightClient.QuarantinePolicyOptions buildPolicyOptions(MitigationParameters.QuarantinePolicy policy) {
         OpenDaylightClient.QuarantinePolicyOptions options = new OpenDaylightClient.QuarantinePolicyOptions();
         options.mode = defaultPolicyMode;
         options.containArp = defaultContainArp;
         options.containDhcp = defaultContainDhcp;
 
-        if (policyJson != null) {
-            String requestedMode = normalizeBlank(policyJson.optString("mode", null));
+        if (policy != null) {
+            String requestedMode = normalizeBlank(policy.getMode());
             if (requestedMode != null) {
                 options.mode = requestedMode;
             }
-            if (policyJson.has("contain_arp")) {
-                options.containArp = policyJson.optBoolean("contain_arp", options.containArp);
+            if (policy.getContainArp() != null) {
+                options.containArp = policy.getContainArp();
             }
-            if (policyJson.has("contain_dhcp")) {
-                options.containDhcp = policyJson.optBoolean("contain_dhcp", options.containDhcp);
+            if (policy.getContainDhcp() != null) {
+                options.containDhcp = policy.getContainDhcp();
             }
         }
 
         return options;
     }
 
-    private void logTelemetryBenchmark(JSONObject metadata, long appliedTimeMillis, String appliedLabel) {
-        if (metadata == null || !metadata.has("telemetry")) {
+    private void logTelemetryBenchmark(Map<String, Object> telemetry, long appliedTimeMillis, String appliedLabel) {
+        if (telemetry == null || telemetry.isEmpty()) {
             return;
         }
 
         try {
-            JSONObject telemetry = metadata.getJSONObject("telemetry");
-            long alertTimeMs = telemetry.optLong("alert_generated_time_ms", 0);
-            long wfTimeMs = telemetry.optLong("workflow_execution_time_ms", 0);
+            long alertTimeMs = toLong(telemetry.get("alert_generated_time_ms"));
+            long wfTimeMs = toLong(telemetry.get("workflow_execution_time_ms"));
 
-            double alertToRec = telemetry.optDouble("alert_to_received_delay_sec", 0.0);
-            double recToWf = telemetry.optDouble("received_to_workflow_delay_sec", 0.0);
+            double alertToRec = toDouble(telemetry.get("alert_to_received_delay_sec"));
+            double recToWf = toDouble(telemetry.get("received_to_workflow_delay_sec"));
             double wfToApplied = wfTimeMs > 0 ? (appliedTimeMillis - wfTimeMs) / 1000.0 : 0.0;
             double totalDuration = alertTimeMs > 0 ? (appliedTimeMillis - alertTimeMs) / 1000.0 : 0.0;
 
@@ -600,9 +596,9 @@ public class OpenDaylightModule implements PluggableModule {
                 "4. %s:    %s (Delay from API call: %.3f sec)\n" +
                 "5. Total Containment Pipeline Duration: %.3f seconds\n" +
                 "==============================================================",
-                telemetry.optString("alert_generated_time", "N/A"),
-                telemetry.optString("system_received_time", "N/A"), alertToRec,
-                telemetry.optString("workflow_execution_time", "N/A"), recToWf,
+                telemetry.getOrDefault("alert_generated_time", "N/A"),
+                telemetry.getOrDefault("system_received_time", "N/A"), alertToRec,
+                telemetry.getOrDefault("workflow_execution_time", "N/A"), recToWf,
                 appliedLabel, Instant.ofEpochMilli(appliedTimeMillis).toString(), wfToApplied,
                 totalDuration
             );
@@ -611,6 +607,20 @@ public class OpenDaylightModule implements PluggableModule {
         } catch (Exception ex) {
             helper.log(getName(), "WARN", "Failed to parse telemetry benchmark data: " + ex.getMessage());
         }
+    }
+
+    private static long toLong(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        return 0L;
+    }
+
+    private static double toDouble(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        return 0.0;
     }
 
     private String normalizeMac(String mac) {

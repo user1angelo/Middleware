@@ -172,7 +172,10 @@ public class WorkflowMatcher {
             } else {
                 String severity = extractValueFromCondition(condition, "severity", "==");
                 if (severity != null) {
-                    if (!payload.has("severity") || !payload.getString("severity").equals(severity)) {
+                    // Case-insensitive to match the != branch above (SDK_USABILITY_AUDIT.md,
+                    // Consistency dimension - these two branches previously disagreed on
+                    // case-sensitivity for logically inverse checks on the same field).
+                    if (!payload.has("severity") || !payload.getString("severity").equalsIgnoreCase(severity)) {
                         return false;
                     }
                 }

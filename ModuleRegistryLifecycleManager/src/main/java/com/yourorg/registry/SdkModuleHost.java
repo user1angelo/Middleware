@@ -17,6 +17,7 @@ import com.nis1.thesis.sdk.CoreSystemApi;
 import com.nis1.thesis.sdk.Event;
 import com.nis1.thesis.sdk.MitigationAction;
 import com.nis1.thesis.sdk.MitigationCommandData;
+import com.nis1.thesis.sdk.MitigationParameters;
 import com.nis1.thesis.sdk.PluggableModule;
 
 /**
@@ -158,6 +159,9 @@ public class SdkModuleHost {
                     policyPayload.put("telemetry", json.getJSONObject("telemetry"));
                 }
                 payload = policyPayload != null ? policyPayload : json;
+            } else if ("SEND_NOTIFICATION".equals(eventType)) {
+                JSONObject notifyPayload = json.optJSONObject("payload");
+                payload = notifyPayload != null ? notifyPayload : json;
             } else if ("ODL_TOPOLOGY_DISCOVER".equals(eventType)) {
                 payload = json; // Pass full JSON
             } else if (eventType.startsWith("odl.")) {
@@ -237,40 +241,58 @@ public class SdkModuleHost {
         MitigationCommandData data = new MitigationCommandData(ip, action, reason);
         data.setWorkflowInstanceId(json.optString("event_id"));
 
-        JSONObject additional = new JSONObject();
-        additional.put("event_type", json.optString("event_type"));
-        additional.put("message_type", json.optString("message_type"));
-        additional.put("mac_address", payload.optString("mac_address", ""));
-        additional.put("mitigation_id", payload.optString("mitigation_id", ""));
-        additional.put("rollback_scope", payload.optString("rollback_scope", ""));
-        additional.put("rollback_request_source", payload.optString("rollback_request_source", ""));
-        additional.put("rollback_reason", payload.optString("rollback_reason", ""));
+        // Typed replacement for what used to be a raw JSON string re-parsed by every reader -
+        // see MitigationParameters' Javadoc / SDK_USABILITY_AUDIT.md, Role Expressiveness.
+        MitigationParameters additional = new MitigationParameters();
+        additional.setEventType(json.optString("event_type"));
+        additional.setMessageType(json.optString("message_type"));
+        additional.setMacAddress(payload.optString("mac_address", ""));
+        additional.setMitigationId(payload.optString("mitigation_id", ""));
+        additional.setRollbackScope(payload.optString("rollback_scope", ""));
+        additional.setRollbackRequestSource(payload.optString("rollback_request_source", ""));
+        additional.setRollbackReason(payload.optString("rollback_reason", ""));
+        additional.setSeverity(payload.optString("severity", null));
 
         // Copy telemetry if present
         if (json.has("telemetry")) {
-            additional.put("telemetry", json.getJSONObject("telemetry"));
+            additional.setTelemetry(json.getJSONObject("telemetry").toMap());
         } else if (payload.has("telemetry")) {
-            additional.put("telemetry", payload.getJSONObject("telemetry"));
+            additional.setTelemetry(payload.getJSONObject("telemetry").toMap());
         }
 
         JSONObject policy = payload.optJSONObject("quarantine_policy");
         if (policy != null) {
-            additional.put("quarantine_policy", policy);
+            MitigationParameters.QuarantinePolicy quarantinePolicy = new MitigationParameters.QuarantinePolicy();
+            quarantinePolicy.setMode(policy.optString("mode", null));
+            // Only set contain_arp/contain_dhcp when the key is actually present - leave them
+            // null (meaning "unspecified, use the module's own configured default") otherwise,
+            // matching the original JSONObject.has(...) guard exactly.
+            if (policy.has("contain_arp")) {
+                quarantinePolicy.setContainArp(policy.optBoolean("contain_arp"));
+            }
+            if (policy.has("contain_dhcp")) {
+                quarantinePolicy.setContainDhcp(policy.optBoolean("contain_dhcp"));
+            }
+            additional.setQuarantinePolicy(quarantinePolicy);
         }
 
         JSONObject lifecycle = payload.optJSONObject("lifecycle");
         if (lifecycle != null) {
-            additional.put("lifecycle", lifecycle);
+            additional.setLifecycle(lifecycle.toMap());
         }
 
-        // Copy any additional custom properties from payload (e.g. severity)
+        // Copy any other custom properties from payload (e.g. anything not one of the typed
+        // fields above) into the loosely-typed extra map, mirroring the previous catch-all.
+        java.util.Set<String> typedKeys = java.util.Set.of("mac_address", "mitigation_id",
+                "rollback_scope", "rollback_request_source", "rollback_reason", "severity",
+                "telemetry", "quarantine_policy", "lifecycle");
         for (String key : payload.keySet()) {
-            if (!additional.has(key)) {
-                additional.put(key, payload.get(key));
+            if (!typedKeys.contains(key)) {
+                additional.putExtra(key, payload.get(key));
             }
         }
 
-        data.setAdditionalParameters(additional.toString());
+        data.setAdditionalParameters(additional);
 
         return data;
     }
@@ -291,6 +313,7 @@ public class SdkModuleHost {
         initializeSingleModule("com.nis1.thesis.udm.OpenDaylightModule", api);
         initializeSingleModule("com.nis1.thesis.udm.SuricataHttpModule", api);
         initializeSingleModule("com.nis1.thesis.udm.ZeekHttpModule", api);
+        initializeSingleModule("com.nis1.thesis.udm.NotificationModule", api);
     }
 
     private void initializeSingleModule(String className, CoreSystemApi api) {
@@ -306,14 +329,26 @@ public class SdkModuleHost {
             PluggableModule module = (PluggableModule) clazz.getDeclaredConstructor().newInstance();
 
             System.out.println("[SdkModuleHost] Initializing SDK module: " + className);
+
+            // Snapshot capabilities before/after initialize() so this module's registration
+            // only claims the event types IT subscribed to - not the shared listener map's
+            // entire cumulative keyset (a real bug: previously every module registered with
+            // api.getCapabilities() directly, which returns ALL event types ANY previously
+            // initialized embedded module has ever subscribed to, since the listener map is
+            // shared. That made findModuleByCapability(...) non-deterministic once more than
+            // one embedded module existed - a later module could incorrectly be returned for
+            // an earlier module's capability, e.g. "INITIATE_MITIGATION").
+            List<String> before = new ArrayList<>(this.api.getCapabilities());
             module.initialize(api);
+            List<String> ownCapabilities = new ArrayList<>(this.api.getCapabilities());
+            ownCapabilities.removeAll(before);
 
             activeModules.put(className, module);
             System.out.println("[SdkModuleHost] Initialized module: " + module.getName());
 
             // Auto-register with ModuleRegistry if available
             if (registry != null) {
-                registerSdkModuleWithRegistry(module, className);
+                registerSdkModuleWithRegistry(module, className, ownCapabilities);
             }
 
         } catch (ClassNotFoundException e) {
@@ -327,11 +362,8 @@ public class SdkModuleHost {
     /**
      * Register SDK module with ModuleRegistry
      */
-    private void registerSdkModuleWithRegistry(PluggableModule module, String className) {
+    private void registerSdkModuleWithRegistry(PluggableModule module, String className, List<String> capabilities) {
         try {
-            // Get capabilities from API subscriptions
-            List<String> capabilities = api.getCapabilities();
-
             // Create registration message
             JSONObject registration = new JSONObject();
             registration.put("message_type", "module.register");
@@ -342,7 +374,14 @@ public class SdkModuleHost {
             payload.put("module_name", module.getName());
             payload.put("module_type", "SDK");
             payload.put("capabilities", new JSONArray(capabilities));
-            payload.put("command_queue", moduleId + "_commands"); // SDK modules use in-memory dispatch
+            // Embedded modules are dispatched to in-process (SdkModuleHost.dispatch()) and never
+            // actually consume from a RabbitMQ queue - the DB column is NOT NULL so this can't be
+            // left empty, but it must not claim a real, consumable queue name exists (the
+            // previous "<moduleId>_commands" value implied a role this field never actually
+            // plays for embedded modules - see SDK_USABILITY_AUDIT.md, Role Expressiveness).
+            // CommandRoutingListener only reads this field on the standalone-module branch, so
+            // this value is never actually used for routing.
+            payload.put("command_queue", "(embedded - in-process dispatch, no queue)");
 
             JSONObject metadata = new JSONObject();
             metadata.put("class_name", className);

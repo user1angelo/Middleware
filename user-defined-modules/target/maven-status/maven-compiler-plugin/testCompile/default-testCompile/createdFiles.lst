@@ -1,4 +1,8 @@
-com\nis1\thesis\udm\MaltrailAlertDataTest.class
-com\nis1\thesis\udm\MaltrailModuleParseTest.class
+com\nis1\thesis\udm\Fail2banModuleParseTest.class
 com\nis1\thesis\udm\SuricataAlertDataTest.class
+com\nis1\thesis\udm\MaltrailAlertDataTest.class
+com\nis1\thesis\udm\SysmonAlertDataTest.class
+com\nis1\thesis\udm\SysmonModuleParseTest.class
+com\nis1\thesis\udm\MaltrailModuleParseTest.class
+com\nis1\thesis\udm\Fail2banAlertDataTest.class
 com\nis1\thesis\udm\SuricataModuleParseTest.class

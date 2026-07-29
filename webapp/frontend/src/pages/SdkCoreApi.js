@@ -66,12 +66,20 @@ const SdkCoreApi = () => {
           <code>subscribeToEvent(String eventType, Consumer&lt;Event&lt;?&gt;&gt; listener)</code>
           <ul>
             <li><strong>Purpose:</strong> Register a callback for events of a particular type or
-              pattern (e.g. <code>"alerts.host.*"</code>).</li>
+              prefix (e.g. <code>"alerts.host.*"</code>).</li>
             <li><strong>Callback:</strong> The listener receives an <code>Event&lt;?&gt;</code> object.
               You cast <code>event.getData()</code> to the expected payload type.</li>
-            <li><strong>Patterns:</strong> The framework supports AMQP-style routing patterns such as
-              <code>alerts.*</code>, <code>alerts.host.*</code>, <code>*.wazuh</code> as described in the
-              SDK documentation.</li>
+            <li><strong>Patterns (be precise here):</strong> only two matching rules exist -
+              an <strong>exact</strong> match against <code>eventType</code>, or a
+              single-level <strong>prefix</strong> wildcard where <code>eventType</code> ends in
+              <code>".*"</code> (e.g. <code>"alerts.host.*"</code> matches
+              <code>"alerts.host.wazuh"</code>). This is <em>not</em> full AMQP topic routing -
+              there is no multi-segment <code>#</code> wildcard and no suffix pattern like
+              <code>"*.wazuh"</code>. Subscribing to that literal string would only ever match an
+              event whose type is exactly <code>"*.wazuh"</code>, which nothing publishes.</li>
+            <li><strong>Note:</strong> this map of subscriptions is shared across every embedded
+              module in the same process - see the audit doc linked below for a real bug this
+              caused with per-module capability registration.</li>
           </ul>
         </li>
       </ul>
@@ -113,23 +121,99 @@ const SdkCoreApi = () => {
         </li>
       </ul>
 
-      <h3>Helper &amp; Data Classes (Overview)</h3>
+      <h3>ModuleHelper</h3>
       <p>
-        The SDK also defines helper and payload classes used in the examples:
+        A convenience wrapper that hides the <code>Event.of(...)</code> + <code>publishEvent(...)</code>
+        boilerplate for a handful of common message types. Construct one with
+        <code>new ModuleHelper(api)</code> inside <code>initialize(CoreSystemApi api)</code>.
       </p>
       <ul>
-        <li><code>ModuleHelper</code> – Convenience wrapper around logging and common patterns.</li>
-        <li><code>HostAlertData</code> – Normalized alert data for host-based alerts.</li>
-        <li><code>EnrichmentRequestData</code> – Request for extra context (e.g. by IP or hash).</li>
-        <li><code>IpReputationData</code> – Result of an IP enrichment / reputation lookup.</li>
-        <li><code>MitigationCommandData</code> – A command to perform some action (block IP, quarantine host).</li>
-        <li><code>MitigationAction</code> – Enum describing supported mitigation actions.</li>
+        <li>
+          <code>publishHostAlert(String sourceIp, String description, String severity)</code> –
+          builds a <code>HostAlertData</code> and publishes it as a <code>"HOST_ALERT"</code> event.
+        </li>
+        <li>
+          <code>publishNidsAlert(String sourceIp, String destinationIp, String signature, String severity)</code> –
+          builds a <code>NidsAlertData</code> and publishes it as a <code>"NIDS_ALERT"</code> event.
+        </li>
+        <li>
+          <code>publishIpReputation(String ipAddress, boolean isMalicious, String source)</code> –
+          builds an <code>IpReputationData</code> and publishes it as
+          <code>"IP_REPUTATION_" + source.toUpperCase()</code>.
+        </li>
+        <li>
+          <code>publishMitigationCommand(String targetHost, MitigationAction action, String justification)</code> –
+          builds a <code>MitigationCommandData</code> and publishes it as an
+          <code>"INITIATE_MITIGATION"</code> event - this is what <code>OpenDaylightModule</code>
+          listens for.
+        </li>
+        <li>
+          <code>requestIpEnrichment(String ipAddress)</code> – builds an
+          <code>EnrichmentRequestData</code> (with <code>enrichmentType</code> defaulted to
+          <code>"IP_REPUTATION"</code>) and publishes it as <code>"ENRICHMENT_REQUEST_IP"</code>.
+        </li>
+        <li>
+          <code>log(String moduleName, String message)</code> and
+          <code>log(String moduleName, String level, String message)</code> – prefixed console
+          logging, e.g. <code>[MyModule][INFO] message</code>.
+        </li>
       </ul>
 
+      <h3>Payload / Data Classes</h3>
+      <p>
+        These are the concrete payload types <code>ModuleHelper</code> builds for you. You can
+        also construct and publish them directly with <code>Event.of(...)</code> if you need a
+        type <code>ModuleHelper</code> doesn't wrap.
+      </p>
+
+      <table className="data-table" style={{ marginBottom: '16px' }}>
+        <thead>
+          <tr><th>Class</th><th>Fields</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>HostAlertData</code></td>
+            <td><code>sourceIp</code>, <code>description</code>, <code>severity</code> (all <code>String</code>)</td>
+            <td>Minimal - no timestamp or hostname field of its own.</td>
+          </tr>
+          <tr>
+            <td><code>NidsAlertData</code></td>
+            <td><code>sourceIp</code>, <code>destinationIp</code>, <code>sourcePort</code>/<code>destinationPort</code> (<code>Integer</code>), <code>protocol</code>, <code>signature</code>, <code>signatureSeverity</code>, <code>category</code>, <code>hostTag</code></td>
+            <td>No <code>@SerializedName</code> annotations - JSON keys are raw camelCase, unlike the snake_case convention used by <code>SuricataAlertData</code>/<code>MaltrailAlertData</code> in the user-defined modules.</td>
+          </tr>
+          <tr>
+            <td><code>IpReputationData</code></td>
+            <td><code>ipAddress</code>, <code>isMalicious</code> (<code>boolean</code>), <code>source</code>, <code>category</code>, <code>confidenceScore</code> (<code>Integer</code>)</td>
+            <td>Three constructors (no-arg, 3-arg basic, 5-arg full).</td>
+          </tr>
+          <tr>
+            <td><code>EnrichmentRequestData</code></td>
+            <td><code>ipAddress</code>, <code>domain</code>, <code>fileHash</code>, <code>enrichmentType</code>, <code>requestId</code></td>
+            <td>Built via named static factories - <code>EnrichmentRequestData.forIpAddress(ip)</code> or <code>EnrichmentRequestData.forRequest(enrichmentType, requestId)</code> - rather than overloaded constructors, so the call site itself says which fields get set (a previous pair of same-shaped constructors here was ambiguous at the call site; see <code>SDK_USABILITY_AUDIT.md</code>).</td>
+          </tr>
+          <tr>
+            <td><code>MitigationCommandData</code></td>
+            <td><code>targetHost</code>, <code>action</code> (<code>MitigationAction</code>), <code>justification</code>, <code>workflowInstanceId</code>, <code>priority</code> (<code>Integer</code>), <code>additionalParameters</code> (<code>MitigationParameters</code>)</td>
+            <td><code>additionalParameters</code> is now a typed <code>MitigationParameters</code> object, not a raw string - see the row below. Previously it was an undocumented JSON-in-a-string whose structure was only knowable from whichever module ended up parsing it; see <code>SDK_USABILITY_AUDIT.md</code>'s Role Expressiveness dimension.</td>
+          </tr>
+          <tr>
+            <td><code>MitigationParameters</code></td>
+            <td><code>eventType</code>, <code>messageType</code>, <code>macAddress</code>, <code>mitigationId</code>, <code>rollbackScope</code>, <code>rollbackRequestSource</code>, <code>rollbackReason</code>, <code>severity</code> (all <code>String</code>), <code>quarantinePolicy</code> (<code>QuarantinePolicy</code>), <code>telemetry</code>/<code>lifecycle</code> (<code>Map&lt;String,Object&gt;</code>), plus <code>getExtra(key)</code>/<code>putExtra(key, value)</code> for anything not covered by a named field</td>
+            <td>Nested <code>QuarantinePolicy</code> has <code>mode</code>, <code>containArp</code>, <code>containDhcp</code> - the latter two are boxed <code>Boolean</code>, not primitive <code>boolean</code>, so <code>null</code> means "unspecified, use the module's default" rather than silently meaning <code>false</code>.</td>
+          </tr>
+          <tr>
+            <td><code>MitigationAction</code> (enum)</td>
+            <td><code>QUARANTINE</code>, <code>BLOCK_IP</code>, <code>RATE_LIMIT</code>, <code>REDIRECT_TRAFFIC</code>, <code>ISOLATE_VLAN</code>, <code>ALERT_ONLY</code>, <code>DISABLE_USER</code>, <code>KILL_PROCESS</code></td>
+            <td>A closed set - adding a new mitigation action requires changing the SDK itself, not just a module.</td>
+          </tr>
+        </tbody>
+      </table>
+
       <p style={{ marginTop: '16px' }}>
-        For each of these types, you can follow the patterns shown in the SDK Detailed Context
-        document and the Wazuh/OpenDaylight examples to understand which fields are required
-        and how they are typically used.
+        For the full, evidence-based usability evaluation of this API (what it does well, what it
+        doesn't, and why), see <code>SDK_USABILITY_AUDIT.md</code> at the repository root - it
+        covers every class on this page plus the standalone-module pattern described on the
+        Patterns tab, using the Cognitive Dimensions framework.
       </p>
     </div>
   );

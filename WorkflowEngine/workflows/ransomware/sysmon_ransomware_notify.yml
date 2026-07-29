@@ -1,0 +1,23 @@
+name: "Sysmon Critical Ransomware Indicator -> Notification"
+version: 1.0
+description: >
+  Notifies the security team when Sysmon reports a critical ransomware pre-encryption
+  command (e.g. shadow copy deletion, backup catalog deletion, forced cipher wipe).
+  Demonstrates the embedded NotificationModule integration path with a non-SDN action.
+
+trigger:
+  event_type: "alerts.host.sysmon"
+  condition: "{{ trigger.payload.severity == 'critical' and trigger.payload.alert_type contains 'ransomware' }}"
+
+steps:
+  - name: "Notify security team of Sysmon ransomware indicator"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SEND_NOTIFICATION"
+        data:
+          title: "Sysmon ransomware pre-encryption indicator"
+          message: "{{ trigger.payload.signature }} on {{ trigger.payload.computer }} (user: {{ trigger.payload.user }})."
+          severity: "{{ trigger.payload.severity }}"
+          source: "{{ trigger.payload.computer }}"
+          source_event_id: "{{ trigger.event_id }}"

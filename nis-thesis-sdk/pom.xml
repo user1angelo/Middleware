@@ -31,6 +31,14 @@
             <artifactId>amqp-client</artifactId>
             <version>5.26.0</version>
         </dependency>
+        <!-- Same version already used by every standalone module (SuricataModule, MaltrailModule,
+             etc.) - needed here so AlertEnvelopeBuilder can return the same JSONObject envelope
+             shape those modules already publish. -->
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20231013</version>
+        </dependency>
         <!-- https://mvnrepository.com/artifact/com.fatboyindustrial.gson-javatime-serialisers/gson-javatime-serialisers -->
         <dependency>
             <groupId>com.fatboyindustrial.gson-javatime-serialisers</groupId>

@@ -5,6 +5,7 @@ import org.json.JSONObject;
 import org.json.JSONArray;
 import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
+import com.nis1.thesis.sdk.AlertEnvelopeBuilder;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -404,11 +405,6 @@ public class SuricataModule {
      * Publishes standardized alerts.network.suricata event
      */
     private static void publishSuricataAlert(SuricataEveLog eveLog, Channel channel) throws IOException {
-        // Create standardized alert message
-        JSONObject alert = new JSONObject();
-        alert.put("message_type", "alert");
-        alert.put("event_id", UUID.randomUUID().toString());
-
         // Parse and format the timestamp
         String timestamp;
         long alertTimeMillis = System.currentTimeMillis();
@@ -423,23 +419,18 @@ public class SuricataModule {
             timestamp = Instant.now().toString();
             alertTimeMillis = Instant.parse(timestamp).toEpochMilli();
         }
-        alert.put("timestamp", timestamp);
 
         // Add Thesis telemetry metadata
         JSONObject telemetry = new JSONObject();
         telemetry.put("alert_generated_time", timestamp);
         telemetry.put("alert_generated_time_ms", alertTimeMillis);
-        
+
         String systemReceivedTimeStr = Instant.now().toString();
         telemetry.put("system_received_time", systemReceivedTimeStr);
         telemetry.put("system_received_time_ms", systemReceivedTimeMillis);
-        
+
         double delaySec = (systemReceivedTimeMillis - alertTimeMillis) / 1000.0;
         telemetry.put("alert_to_received_delay_sec", delaySec);
-        alert.put("telemetry", telemetry);
-
-        alert.put("event_type", "alerts.network.suricata");
-        alert.put("source_module", MODULE_NAME);
 
         // Create payload using SuricataAlertData
         SuricataAlertData payloadData = new SuricataAlertData();
@@ -475,7 +466,14 @@ public class SuricataModule {
 
         // Convert to JSON using Gson for proper serialization
         String payloadJson = gson.toJson(payloadData);
-        alert.put("payload", new JSONObject(payloadJson));
+
+        JSONObject alert = AlertEnvelopeBuilder.create()
+                .timestamp(Instant.parse(timestamp))
+                .telemetry(telemetry)
+                .eventType("alerts.network.suricata")
+                .sourceModule(MODULE_NAME)
+                .payload(new JSONObject(payloadJson))
+                .build();
 
         // Publish the alert to workflow_queue (ModuleRegistry will forward to
         // alerts_queue)

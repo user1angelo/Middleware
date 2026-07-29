@@ -109,7 +109,7 @@ public class ModuleHelper {
      * @param ipAddress The IP address to request enrichment data for
      */
     public void requestIpEnrichment(String ipAddress) {
-        EnrichmentRequestData payload = new EnrichmentRequestData(ipAddress);
+        EnrichmentRequestData payload = EnrichmentRequestData.forIpAddress(ipAddress);
         Event<EnrichmentRequestData> event = Event.of("ENRICHMENT_REQUEST_IP", payload);
         api.publishEvent(event);
     }

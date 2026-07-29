@@ -23,7 +23,7 @@ public class MitigationCommandData {
     private String justification;
     private String workflowInstanceId;
     private Integer priority;
-    private String additionalParameters;
+    private MitigationParameters additionalParameters;
 
     /**
      * Default constructor for JSON deserialization.
@@ -125,16 +125,20 @@ public class MitigationCommandData {
     public void setPriority(Integer priority) { this.priority = priority; }
 
     /**
-     * Returns additional parameters for the mitigation action in JSON or key-value format.
-     * 
-     * @return Additional parameters string
+     * Returns the typed additional parameters for this mitigation command (mac address,
+     * mitigation ID, quarantine policy, telemetry, rollback context, etc.) - see
+     * {@link MitigationParameters} for the exact field set. Was previously a raw JSON
+     * {@code String} that every reader had to re-parse and whose shape was undiscoverable
+     * from the type system alone.
+     *
+     * @return The typed additional parameters, or {@code null} if none were set
      */
-    public String getAdditionalParameters() { return additionalParameters; }
-    
+    public MitigationParameters getAdditionalParameters() { return additionalParameters; }
+
     /**
-     * Sets additional parameters for the mitigation action in JSON or key-value format.
-     * 
-     * @param additionalParameters Additional parameters string
+     * Sets the typed additional parameters for this mitigation command.
+     *
+     * @param additionalParameters The typed additional parameters
      */
-    public void setAdditionalParameters(String additionalParameters) { this.additionalParameters = additionalParameters; }
+    public void setAdditionalParameters(MitigationParameters additionalParameters) { this.additionalParameters = additionalParameters; }
 }

@@ -5,6 +5,7 @@ import org.json.JSONObject;
 import org.json.JSONArray;
 import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
+import com.nis1.thesis.sdk.AlertEnvelopeBuilder;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -384,13 +385,8 @@ public class MaltrailModule {
      * scoring - without needing a live RabbitMQ broker.
      */
     static JSONObject buildMaltrailAlertJson(MaltrailEvent event) {
-        JSONObject alert = new JSONObject();
-        alert.put("message_type", "alert");
-        alert.put("event_id", UUID.randomUUID().toString());
-
         long alertTimeMillis = event.timestamp != null ? event.timestamp * 1000L : System.currentTimeMillis();
         String timestamp = Instant.ofEpochMilli(alertTimeMillis).toString();
-        alert.put("timestamp", timestamp);
 
         // Add Thesis telemetry metadata (mirrors SuricataModule's telemetry envelope)
         JSONObject telemetry = new JSONObject();
@@ -404,10 +400,6 @@ public class MaltrailModule {
 
         double delaySec = (systemReceivedTimeMillis - alertTimeMillis) / 1000.0;
         telemetry.put("alert_to_received_delay_sec", delaySec);
-        alert.put("telemetry", telemetry);
-
-        alert.put("event_type", "alerts.network.maltrail");
-        alert.put("source_module", MODULE_NAME);
 
         // Create payload using MaltrailAlertData
         MaltrailAlertData payloadData = new MaltrailAlertData();
@@ -436,9 +428,14 @@ public class MaltrailModule {
 
         // Convert to JSON using Gson for proper serialization
         String payloadJson = gson.toJson(payloadData);
-        alert.put("payload", new JSONObject(payloadJson));
 
-        return alert;
+        return AlertEnvelopeBuilder.create()
+                .timestamp(Instant.parse(timestamp))
+                .telemetry(telemetry)
+                .eventType("alerts.network.maltrail")
+                .sourceModule(MODULE_NAME)
+                .payload(new JSONObject(payloadJson))
+                .build();
     }
 
     // ---------------------------------------------------------------------

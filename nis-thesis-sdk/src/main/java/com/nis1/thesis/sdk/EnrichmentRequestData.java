@@ -31,23 +31,35 @@ public class EnrichmentRequestData {
 
     /**
      * Constructs an IP reputation enrichment request.
-     * 
+     * <p>
+     * Named factory method rather than a constructor - a previous single-argument
+     * {@code EnrichmentRequestData(String)} constructor and a two-argument
+     * {@code EnrichmentRequestData(String, String)} constructor looked similar enough at a call
+     * site that a reader could not tell which fields ended up set without checking parameter
+     * <em>names</em>, not just arity (see SDK_USABILITY_AUDIT.md, Role Expressiveness). Named
+     * factories make the intent explicit at every call site instead.
+     *
      * @param ipAddress The IP address to request enrichment data for
      */
-    public EnrichmentRequestData(String ipAddress) {
-        this.ipAddress = ipAddress;
-        this.enrichmentType = "IP_REPUTATION";
+    public static EnrichmentRequestData forIpAddress(String ipAddress) {
+        EnrichmentRequestData request = new EnrichmentRequestData();
+        request.ipAddress = ipAddress;
+        request.enrichmentType = "IP_REPUTATION";
+        return request;
     }
 
     /**
-     * Constructs an enrichment request with specified type and correlation ID.
-     * 
+     * Constructs an enrichment request with an explicit type and correlation ID (for
+     * non-IP-reputation enrichment kinds, e.g. domain or file-hash lookups).
+     *
      * @param enrichmentType The type of enrichment requested (e.g., "IP_REPUTATION", "DOMAIN_LOOKUP", "FILE_HASH")
      * @param requestId Correlation identifier for tracking this enrichment request
      */
-    public EnrichmentRequestData(String enrichmentType, String requestId) {
-        this.enrichmentType = enrichmentType;
-        this.requestId = requestId;
+    public static EnrichmentRequestData forRequest(String enrichmentType, String requestId) {
+        EnrichmentRequestData request = new EnrichmentRequestData();
+        request.enrichmentType = enrichmentType;
+        request.requestId = requestId;
+        return request;
     }
 
     /**

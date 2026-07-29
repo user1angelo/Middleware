@@ -1,0 +1,22 @@
+name: "Fail2ban High-Severity Ban -> Notification"
+version: 1.0
+description: >
+  Notifies the security team when Fail2ban bans a host for brute-force activity.
+  Demonstrates the embedded NotificationModule integration path with a non-SDN action.
+
+trigger:
+  event_type: "alerts.host.fail2ban"
+  condition: "{{ trigger.payload.severity == 'high' }}"
+
+steps:
+  - name: "Notify security team of Fail2ban ban"
+    action:
+      type: "PUBLISH_EVENT"
+      event:
+        type: "SEND_NOTIFICATION"
+        data:
+          title: "Fail2ban brute-force ban"
+          message: "Fail2ban banned {{ trigger.payload.source_ip }} after repeated failed logins on jail '{{ trigger.payload.jail }}'."
+          severity: "{{ trigger.payload.severity }}"
+          source: "{{ trigger.payload.source_ip }}"
+          source_event_id: "{{ trigger.event_id }}"

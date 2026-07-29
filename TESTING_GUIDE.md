@@ -1,33 +1,52 @@
 # Testing Guide - How to Verify Everything That Changed
 
-This guide assumes you know nothing about this codebase. It walks through checking all the
-work from this session, starting with the easiest checks (nothing extra to install) and
-working up to a full live end-to-end test (needs RabbitMQ running).
+This guide assumes you know nothing about this codebase, and that you're running it on
+**Ubuntu** (in a VM). It walks through checking all the work from this session, starting with
+the easiest checks (nothing extra to install) and working up to a full live end-to-end test
+(needs RabbitMQ running).
 
 **You do not need to do every tier.** Tier 1 alone proves the code is correct. Tiers 2-4 prove
 it actually works when wired up to a real message broker, which is nice to see but optional.
 
-Every command below is written for **Windows PowerShell**, run from the repo root
-(`C:\Users\keanl\Documents\GitHub\Middleware`), unless a step says to `cd` somewhere else.
+Every command below is a **bash** command, run from the repo root (wherever you cloned/copied
+this project on the Ubuntu VM - the guide just calls that `$REPO`). Replace `$REPO` with your
+actual path, or `cd` into it once and run `export REPO=$(pwd)` so you can copy-paste the rest
+verbatim.
 
 ---
 
 ## What you need before starting
 
-- **Java 17+** and **Maven** - already installed and working (confirmed during this session).
+Check what's already installed:
+
+```bash
+java -version      # need 17 or newer
+mvn -version        # Maven
+python3 --version
+```
+
+- **Java 17+ and Maven** - required for everything in this guide.
 - **Python 3** - only needed for two small test scripts (Tier 1.4 and Tier 3).
 - **RabbitMQ** - only needed for Tier 3 (the full live test). Everything else works without it.
 - **PostgreSQL** - not needed for anything in this guide. The one place it's used
   (`ThreatContextStore`, `ModuleRegistry`) already fails gracefully (logs an error, keeps
   running) if the database isn't reachable, so you can ignore those log lines.
 
-One thing every `mvn` command needs on this machine: PowerShell doesn't pick up Maven's
-location automatically in a fresh window. If you ever see `mvn: The term 'mvn' is not
-recognized`, run this first (once per PowerShell window) and then retry:
-
-```powershell
-$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+If `mvn` or `java` says "command not found", they're either not installed or not on your
+`PATH` yet. On Ubuntu:
+```bash
+sudo apt update
+sudo apt install openjdk-17-jdk maven -y
 ```
+Then open a new terminal (or run `source ~/.bashrc`) and re-check with `java -version` /
+`mvn -version`.
+
+**Important repo convention:** this codebase's `WorkflowEngine` and `ThreatContextStore` build
+with a classpath string that uses `;` as the separator in its README (that's the Windows form -
+the same repo was also developed on Windows). **On Linux/Ubuntu you must use `:` instead of `;`
+everywhere you see a classpath.** Every command in this guide already uses `:` - just don't
+copy classpath syntax from the root `README.md` verbatim, it's written for both OSes with a
+comment, not always the Linux form.
 
 ---
 
@@ -37,8 +56,9 @@ $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";"
 
 This alone catches most possible mistakes.
 
-```powershell
-mvn -f "C:\Users\keanl\Documents\GitHub\Middleware\pom.xml" compile
+```bash
+cd "$REPO"
+mvn compile
 ```
 
 **What success looks like:** near the bottom, you'll see:
@@ -58,13 +78,13 @@ That covers 3 of the 5 Java projects (they're all managed by Maven together). Th
 `WorkflowEngine` and `ThreatContextStore`, use a different, simpler build method (plain `javac`,
 not Maven) - that's a deliberate repo convention, not a mistake. Check those too:
 
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware\WorkflowEngine"
-javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java
+```bash
+cd "$REPO/WorkflowEngine"
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/workflow/*.java
 ```
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware\ThreatContextStore"
-javac -cp "lib/*;target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
+```bash
+cd "$REPO/ThreatContextStore"
+javac -cp "lib/*:target/classes" -d target/classes src/main/java/com/yourorg/middleware/*.java
 ```
 
 **What success looks like:** no output at all. `javac` only prints something when there's an
@@ -72,11 +92,11 @@ error or warning - silence means it worked.
 
 ### 1.2 Run the automated test suite
 
-This is the most important check - it's a set of 21 automated tests (added this session; there
-were zero before) that verify the code actually behaves correctly, not just that it compiles.
+This is the most important check - it's a set of 35 automated tests (there were zero before this
+work started) that verify the code actually behaves correctly, not just that it compiles.
 
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware"
+```bash
+cd "$REPO"
 mvn test
 ```
 
@@ -84,26 +104,27 @@ mvn test
 ```
 [INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0     <- nis-thesis-sdk
 ...
-[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0    <- user-defined-modules
+[INFO] Tests run: 26, Failures: 0, Errors: 0, Skipped: 0    <- user-defined-modules
 ...
 [INFO] BUILD SUCCESS
 ```
-21 tests total, 0 failures. If a number under "Failures" or "Errors" is anything other than 0,
+35 tests total, 0 failures. If a number under "Failures" or "Errors" is anything other than 0,
 Maven prints the failing test's name and a stack trace right above the summary - that tells you
 exactly which check broke and why.
 
-**What these 21 tests actually check**, in plain English:
+**What these 35 tests actually check**, in plain English:
 - Can an `Event` (the SDK's generic message wrapper) be turned into JSON text and back into an
   object without losing data? (6 tests)
-- Same question for the alert data used by Suricata and by the new Maltrail module (4 tests) -
+- Same question for the alert data used by Suricata, Maltrail, Fail2ban, and Sysmon (8 tests) -
   specifically making sure the JSON field names come out exactly right (e.g. `source_ip`, not
   `sourceIp`), since a typo there would silently break alert matching downstream.
-- If the Suricata or Maltrail module receives garbage input (malformed JSON, or JSON that's
+- If any of the four modules receives garbage input (malformed JSON/log line, or input that's
   missing required fields like the source IP), does it correctly log a warning and drop the
-  message instead of crashing? (8 tests)
-- If Maltrail sends a *well-formed* event, does the module correctly figure out its severity,
-  category, and threat score? (1 test - checks the full mapping logic)
-- One test also caught and documents a real, pre-existing bug: the plain way this code base
+  message instead of crashing? (roughly half the suite - one set of these tests per module)
+- If a module receives a *well-formed* event, does it correctly figure out severity, category,
+  and threat score? (checks the full mapping logic, including Sysmon's ransomware-command
+  detection and Fail2ban's jail-based scoring)
+- One test also caught and documents a real, pre-existing bug: the plain way this codebase
   serializes JSON can't actually handle timestamps correctly on this version of Java. The test
   proves that failure happens, and also proves the *correct* way (already available as a
   library dependency, just never wired up) fixes it.
@@ -113,41 +134,42 @@ exactly which check broke and why.
 These were simple text fixes, so "testing" them just means reading the file and confirming it
 says what it should now.
 
-```powershell
-Get-Content "C:\Users\keanl\Documents\GitHub\Middleware\ThreatContextStore\schema.sql"
+```bash
+cat "$REPO/ThreatContextStore/schema.sql"
 ```
 Should show `CREATE TABLE alerts` - **not** `wazuh_alerts`.
 
-```powershell
-Get-Content "C:\Users\keanl\Documents\GitHub\Middleware\README.md" | Select-String -Context 2,2 "Running Unit Tests"
+```bash
+grep -A3 "Running Unit Tests" "$REPO/README.md"
 ```
 Should say no automated test suite existed *before this session* and point at the manual tester
 utilities - not the old (false) claim that every module had its own test suite.
 
-```powershell
-Get-Content "C:\Users\keanl\Documents\GitHub\Middleware\nis-thesis-sdk\src\main\java\com\nis1\thesis\sdk\CoreSystemApi.java" | Select-String -Context 1,1 "topic exchange|basicPublish"
+```bash
+grep -B2 -A2 "topic exchange\|basicPublish" \
+  "$REPO/nis-thesis-sdk/src/main/java/com/nis1/thesis/sdk/CoreSystemApi.java"
 ```
 The Javadoc comment should describe a single named RabbitMQ queue, not a "topic exchange" (the
 old comment described something the code never actually did).
 
 ### 1.4 Test the benchmark-summary script
 
-No live system needed - this uses two tiny fake CSV files.
+No live system needed - this uses one tiny fake CSV file.
 
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware"
-New-Item -ItemType Directory -Force -Path scratch_test | Out-Null
-@"
+```bash
+cd "$REPO"
+mkdir -p scratch_test
+cat > scratch_test/benchmark_run_test.csv << 'EOF'
 traceId,stage,startEpochMs,endEpochMs,durationMs
 alert-1,consume_deserialize,1000,1005,5
 alert-1,workflow_load,1005,1050,45
 alert-1,policy_match,1050,1060,10
 alert-1,command_dispatch,1060,1075,15
 alert-1,registry_route_dispatch,1075,1090,15
-"@ | Set-Content scratch_test\benchmark_run_test.csv
+EOF
 
-python scripts\summarize_benchmark.py scratch_test\benchmark_run_test.csv
-Remove-Item -Recurse -Force scratch_test
+python3 scripts/summarize_benchmark.py scratch_test/benchmark_run_test.csv
+rm -rf scratch_test
 ```
 
 **What success looks like:** a table showing each of the 5 stages with a duration, then an
@@ -156,56 +178,40 @@ Remove-Item -Recurse -Force scratch_test
 
 ---
 
-## Tier 2: Verify the Maltrail workflow matches, still without RabbitMQ
+## Tier 2: Verify a workflow matches, still without RabbitMQ
 
-This proves the new `maltrail_ransomware_isolate.yml` workflow file is written correctly and
-would actually fire on a real Maltrail alert - checked directly against the matching engine,
-without needing a live message broker.
+This proves a workflow YAML file is written correctly and would actually fire on a given alert -
+checked directly against the matching engine, without needing a live message broker.
 
-Save this as `WorkflowEngine\WorkflowMatchCheck.java` (temporary file, not part of the real
-codebase - delete it when you're done):
+There's a permanent, supported tool for this now: `WorkflowDryRunTool.java` (lives alongside the
+existing `WorkflowTester.java` in `WorkflowEngine/`). It replaced an earlier throwaway-`.java`-file
+trick that had to be reinvented from scratch each time a new source's workflow needed checking -
+see `SDK_USABILITY_AUDIT.md`'s Progressive Evaluation dimension for why that was worth fixing.
 
-```java
-import com.yourorg.workflow.*;
-import org.json.JSONObject;
-import java.util.List;
-
-public class WorkflowMatchCheck {
-    public static void main(String[] args) throws Exception {
-        WorkflowLoader loader = new WorkflowLoader();
-        WorkflowMatcher matcher = new WorkflowMatcher();
-        List<Workflow> workflows = loader.loadWorkflows("workflows/ransomware");
-
-        JSONObject alert = new JSONObject();
-        alert.put("message_type", "alert");
-        alert.put("event_id", "test-001");
-        alert.put("timestamp", java.time.Instant.now().toString());
-        alert.put("event_type", "alerts.network.maltrail");
-        alert.put("source_module", "Maltrail UDM");
-
-        JSONObject payload = new JSONObject();
-        payload.put("severity", "high");
-        payload.put("alert_type", "ransomware");
-        payload.put("source_ip", "10.0.0.55");
-        payload.put("signature", "ransomware");
-        alert.put("payload", payload);
-
-        List<Workflow> matches = matcher.findMatchingWorkflows(alert, workflows);
-        boolean matched = matches.stream().anyMatch(w -> w.getName().contains("Maltrail"));
-        System.out.println(matched ? "PASS - Maltrail workflow matched" : "FAIL - did not match");
-    }
-}
+Build it once:
+```bash
+cd "$REPO/WorkflowEngine"
+javac -cp "lib/*:target/classes" -d target/classes WorkflowDryRunTool.java
 ```
 
-Then run:
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware\WorkflowEngine"
-javac -cp "lib/*;target/classes" -d target/classes WorkflowMatchCheck.java
-java -cp "lib/*;target/classes" WorkflowMatchCheck
-Remove-Item WorkflowMatchCheck.java, target\classes\WorkflowMatchCheck.class
+Then check any sample alert JSON against any workflow directory:
+```bash
+java -cp "lib/*:target/classes" WorkflowDryRunTool workflows/ransomware sample_alerts/maltrail_ransomware_alert.json
+java -cp "lib/*:target/classes" WorkflowDryRunTool workflows/ransomware sample_alerts/sysmon_ransomware_alert.json
 ```
 
-**What success looks like:** `PASS - Maltrail workflow matched`.
+Two ready-to-use sample alerts already ship in `WorkflowEngine/sample_alerts/` - copy one and
+edit its `payload` to try your own alert shape against any workflow you're writing.
+
+**What success looks like:** the tool prints how many workflows matched and their names, e.g.:
+```
+=== RESULT ===
+2 workflow(s) matched:
+  - Maltrail High-Severity Ransomware Trail -> SDN Isolation (trigger event_type: alerts.network.maltrail)
+  - ODL Ransomware Detection & Prevention Workflow (trigger event_type: )
+```
+If nothing matches, the tool prints a hint about what to check (event_type spelling, condition
+field names/casing/operators).
 
 ---
 
@@ -216,99 +222,151 @@ command comes out the other side. It requires RabbitMQ actually running.
 
 ### 3.1 Start RabbitMQ
 
-The easiest way, if you have Docker Desktop installed:
-```powershell
+**Option A - native Ubuntu package (simplest, no Docker needed):**
+```bash
+sudo apt install rabbitmq-server -y
+sudo systemctl enable --now rabbitmq-server
+sudo rabbitmqctl add_user user password
+sudo rabbitmqctl set_user_tags user administrator
+sudo rabbitmqctl set_permissions -p / user ".*" ".*" ".*"
+```
+
+**Option B - Docker, if you have it installed:**
+```bash
 docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
 docker exec rabbitmq rabbitmqctl add_user user password
 docker exec rabbitmq rabbitmqctl set_user_tags user administrator
 docker exec rabbitmq rabbitmqctl set_permissions -p / user ".*" ".*" ".*"
 ```
+
 (The username/password `user`/`password` matches what's already in this repo's config files -
 don't change it unless you also update every `config.properties` / `*.properties` file.)
 
-Don't have Docker? Install RabbitMQ natively from https://www.rabbitmq.com/docs/install-windows
-instead, then run the same three `rabbitmqctl` commands (drop the `docker exec rabbitmq` prefix).
-
 **Check it's actually up** before continuing:
-```powershell
-Test-NetConnection -ComputerName localhost -Port 5672
+```bash
+nc -zv localhost 5672
 ```
-`TcpTestSucceeded` should say `True`.
+Should print something like `Connection to localhost 5672 port [tcp/amqp] succeeded!`. If `nc`
+isn't installed, `sudo apt install netcat-openbsd -y` first, or just try starting WorkflowEngine
+in step 3.2 and see if it connects.
 
-### 3.2 Start the three Java processes
+### 3.2 Start the Java processes
 
-Open **three separate PowerShell windows** (each one needs to stay open and running - they're
-long-lived processes, like servers). In each, refresh PATH first if needed (see the top of this
-guide).
+You need **five separate terminal tabs/windows** left open (they're long-lived processes, like
+servers, not one-off commands). In each one, `cd "$REPO"` (or re-export `REPO` if it's a fresh
+shell) before running its command. `NotificationModule` needs no separate terminal - it's
+embedded and starts automatically inside ModuleRegistry (Terminal 1), the same way
+`OpenDaylightModule` does.
 
-**Window 1 - ModuleRegistry** (routes commands to modules):
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware\ModuleRegistryLifecycleManager"
-java -cp "target/classes;lib/*;../nis-thesis-sdk/target/classes;../user-defined-modules/target/classes;../user-defined-modules/*" com.yourorg.registry.ModuleRegistryMain
+**Terminal 1 - ModuleRegistry** (routes commands to modules, hosts the embedded
+`NotificationModule`):
+```bash
+cd "$REPO/ModuleRegistryLifecycleManager"
+java -cp "target/classes:lib/*:../nis-thesis-sdk/target/classes:../user-defined-modules/target/classes:../user-defined-modules/*" com.yourorg.registry.ModuleRegistryMain
 ```
 Wait for: `✅ ModuleRegistryAndLifecycleManager is running`. You'll also see a red
 `❌ Failed to load modules from database` line - that's expected and harmless, it's just
-Postgres being unreachable (see "What you need" above).
+Postgres being unreachable (see "What you need" above). You should also see
+`[SdkModuleHost] Initialized module: Notification Module` in the startup log.
 
-**Window 2 - WorkflowEngine** (matches alerts against workflow YAML files):
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware\WorkflowEngine"
-java -cp "target/classes;lib/*" com.yourorg.workflow.WorkflowEngineMain
+**Terminal 2 - WorkflowEngine** (matches alerts against workflow YAML files):
+```bash
+cd "$REPO/WorkflowEngine"
+java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain
 ```
 Wait for: `⏳ Waiting for alerts from queue: workflow_queue`.
 
-**Window 3 - MaltrailModule** (the new module - listens for UDP events, publishes alerts):
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware\user-defined-modules"
-java -cp "target/classes;../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.MaltrailModule
+**Terminal 3 - MaltrailModule** (listens for UDP events, publishes alerts):
+```bash
+cd "$REPO/user-defined-modules"
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.MaltrailModule
 ```
 Wait for: `✅ Maltrail UDP listener bound to port 8481`.
 
-If any of these three fail immediately with a connection error, RabbitMQ isn't reachable - go
-back to 3.1.
-
-### 3.3 Send a simulated Maltrail alert
-
-In a **fourth** PowerShell window:
-```powershell
-cd "C:\Users\keanl\Documents\GitHub\Middleware"
-python scripts\send_test_maltrail_event.py
+**Terminal 4 - Fail2banModule** (tails a simulated fail2ban.log, publishes alerts):
+```bash
+cd "$REPO/user-defined-modules"
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.Fail2banModule
 ```
+Wait for: `✅ Monitoring started from position:`. This module creates
+`user-defined-modules/simulated_logs/fail2ban.log` itself if it doesn't already exist - no real
+fail2ban install needed.
 
-**What success looks like**, watching the three windows from step 3.2:
-- **Window 3 (MaltrailModule):** a line like
+**Terminal 5 - SysmonModule** (listens for UDP Sysmon-shaped JSON, publishes alerts):
+```bash
+cd "$REPO/user-defined-modules"
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.SysmonModule
+```
+Wait for: `✅ Sysmon UDP listener bound to port 8482`.
+
+If any of these fail immediately with a connection error, RabbitMQ isn't reachable - go back to
+3.1.
+
+> **Shortcut:** `$REPO/start-all.sh` already automates starting ModuleRegistry, WorkflowEngine,
+> ThreatContextStore, and the web dashboard together (it's the repo's own launcher, written for
+> this exact Linux setup). It does **not** yet know about MaltrailModule/Fail2banModule/
+> SysmonModule (all added after it was written), so if you use it, still start Terminals 3-5
+> manually as shown above. It also assumes RabbitMQ is already running - step 3.1 still applies
+> first.
+
+### 3.3 Send simulated events from all four sources
+
+One script covers every source - in a **sixth** terminal:
+```bash
+cd "$REPO"
+python3 scripts/simulate_all_sources.py --source all
+```
+Or trigger just one at a time: `--source maltrail`, `--source fail2ban`, `--source sysmon`, or
+`--source suricata` (this last one needs `--eve-path` pointed at wherever `SuricataModule` is
+configured to tail, since its default is the real `/var/log/suricata/eve.json` path).
+
+**What success looks like**, watching the terminals from step 3.2:
+
+*Maltrail and Sysmon-ransomware paths (SDN isolation / notification):*
+- **Terminal 3 (MaltrailModule):**
   `📤 Published Maltrail alert: ransomware [Severity: high] ... (trail: 203.0.113.9)`
-- **Window 2 (WorkflowEngine):** the alert arrives, and further down you should see
-  `✅ Found 1 matching specific workflow(s)` followed by
-  `Isolate host flagged by Maltrail ransomware trail` (the step name from the new workflow file)
-  and `📤 Published command to workflow_response_queue`.
-- **Window 1 (ModuleRegistry):** a line like `🎯 Routing command: INITIATE_MITIGATION` -
-  this is the point where the system would actually isolate the host on a real network.
-  It's expected to then say something like "No module found with capability" or "module
-  offline" and stop there, since there's no real SDN switch/OpenDaylight controller connected
-  in this test - the important part (alert → matched → mitigation command generated) already
-  happened successfully by this point.
+- **Terminal 5 (SysmonModule):**
+  `📤 Published Sysmon alert: Ransomware pre-encryption command detected: ... [Severity: critical]`
+- **Terminal 2 (WorkflowEngine):** for Maltrail, `✅ Found 1 matching specific workflow(s)` then
+  `Isolate host flagged by Maltrail ransomware trail` and
+  `📤 Published command to workflow_response_queue`. For Sysmon, the matching workflow name is
+  `Notify security team of Sysmon ransomware indicator`.
+- **Terminal 1 (ModuleRegistry):** for Maltrail, `🎯 Routing command: INITIATE_MITIGATION` (then
+  likely "No module found"/"module offline" since there's no real SDN controller connected - the
+  important part, alert -> matched -> command generated, already happened). For Sysmon, you
+  should see the command routed to the embedded module, followed by a boxed `🔔 NOTIFICATION`
+  block printed directly in this terminal - proof the embedded `NotificationModule` pattern
+  works end to end.
 
-If you don't see the alert show up in Window 2 within a couple seconds, double check Window 3
-actually printed the "Published Maltrail alert" line first - if it didn't, the UDP packet from
-step 3.3 isn't reaching the module (check nothing else is using port 8481).
+*Fail2ban path (notification):*
+- **Terminal 4 (Fail2banModule):** `📤 Published Fail2ban alert: SSH brute-force (jail: sshd) ...`
+- **Terminal 2 (WorkflowEngine):** matches `Fail2ban High-Severity Ban -> Notification`.
+- **Terminal 1 (ModuleRegistry):** another `🔔 NOTIFICATION` block, this time about the
+  Fail2ban ban.
+
+If an alert doesn't show up in Terminal 2 within a couple seconds, check the corresponding
+module's terminal actually printed its "Published ... alert" line first - if it didn't, the
+simulated input isn't reaching that module (for UDP sources, check nothing else is using the
+port, e.g. `sudo ss -tulpn | grep 8481` for Maltrail or `8482` for Sysmon; for Fail2ban, confirm
+`user-defined-modules/simulated_logs/fail2ban.log` is the same path both the module and the
+simulator script are using).
 
 ### 3.4 Check the performance-timing data this run produced
 
-While those windows are running, every alert that flows through also gets timed. Check for a
+While those terminals are running, every alert that flows through also gets timed. Check for a
 CSV file that appeared automatically:
 
-```powershell
-Get-ChildItem "C:\Users\keanl\Documents\GitHub\Middleware\WorkflowEngine\benchmark_output\"
-Get-ChildItem "C:\Users\keanl\Documents\GitHub\Middleware\ModuleRegistryLifecycleManager\benchmark_output\"
+```bash
+ls "$REPO/WorkflowEngine/benchmark_output/"
+ls "$REPO/ModuleRegistryLifecycleManager/benchmark_output/"
 ```
 
 Each should contain a file named like `benchmark_run_20260725.csv`. Summarize both together:
 
-```powershell
-python scripts\summarize_benchmark.py `
-  "C:\Users\keanl\Documents\GitHub\Middleware\WorkflowEngine\benchmark_output" `
-  "C:\Users\keanl\Documents\GitHub\Middleware\ModuleRegistryLifecycleManager\benchmark_output"
+```bash
+python3 scripts/summarize_benchmark.py \
+  "$REPO/WorkflowEngine/benchmark_output" \
+  "$REPO/ModuleRegistryLifecycleManager/benchmark_output"
 ```
 
 This is real, measured timing data for how long each internal processing step took for the
@@ -318,8 +376,10 @@ you want more than one data point.
 
 ### 3.5 Shut everything down
 
-Go to each of the three windows from 3.2 and press `Ctrl+C`. If you started RabbitMQ via Docker:
-```powershell
+Go to each of the three terminals from 3.2 and press `Ctrl+C`. If you started RabbitMQ via the
+native package, you can leave it running (it's a system service) or stop it with
+`sudo systemctl stop rabbitmq-server`. If you used Docker:
+```bash
 docker stop rabbitmq
 docker rm rabbitmq
 ```
@@ -337,26 +397,41 @@ docker rm rabbitmq
 | `StageTimer` + 5-stage instrumentation | Live run + check `benchmark_output/*.csv` exists | 3.4 |
 | `summarize_benchmark.py` | Run against a sample or real CSV | 1.4 / 3.4 |
 | `MaltrailModule` / `MaltrailAlertData` | Compiles + JUnit tests + (optionally) live UDP send | 1.1, 1.2, 3.3 |
-| `maltrail_ransomware_isolate.yml` workflow | Offline match check, or live run | 2 / 3.3 |
-| Zero core-file changes for Maltrail | `git status` shows no edits to `CoreSystemApi.java`/`WorkflowMatcher.java`/`OpenDaylightModule.java` from this addition | - |
-| JUnit test suite (21 tests) | `mvn test` | 1.2 |
+| `Fail2banModule` / `Fail2banAlertData` | Compiles + JUnit tests + (optionally) live log-tail | 1.1, 1.2, 3.3 |
+| `SysmonModule` / `SysmonAlertData` | Compiles + JUnit tests + (optionally) live UDP send | 1.1, 1.2, 3.3 |
+| `NotificationModule` (embedded pattern) | Live run - watch for the `🔔 NOTIFICATION` block in ModuleRegistry's terminal | 3.3 |
+| `maltrail_ransomware_isolate.yml` / `fail2ban_brute_force_notify.yml` / `sysmon_ransomware_notify.yml` workflows | Offline match check, or live run | 2 / 3.3 |
+| Zero core-file changes for Maltrail/Fail2ban/Sysmon | `git status` shows no edits to `CoreSystemApi.java`/`WorkflowMatcher.java`/`OpenDaylightModule.java` from these additions | - |
+| `simulate_all_sources.py` | Run with `--source all` or one source at a time | 3.3 |
+| JUnit test suite (35 tests) | `mvn test` | 1.2 |
+| `SDK_USABILITY_AUDIT.md` | Read it - no test needed, it's an analysis document, not code | - |
 
 ---
 
 ## Troubleshooting
 
-- **`mvn: The term 'mvn' is not recognized`** - run the PATH-refresh command at the top of this
-  guide, then retry the same command.
+- **`mvn: command not found` / `java: command not found`** - see "What you need before
+  starting" above; install via `apt`, then open a new terminal.
 - **`javac` prints nothing** - that's success, not a hang. `javac` is silent when it works.
 - **A Java process exits immediately with a RabbitMQ/connection error** - RabbitMQ isn't running
-  or isn't reachable on `localhost:5672`. Check `Test-NetConnection -ComputerName localhost -Port 5672`.
+  or isn't reachable on `localhost:5672`. Check with `nc -zv localhost 5672`.
 - **"Failed to load modules from database" / "Failed to save module to database"** - expected
   and harmless in this guide; it just means PostgreSQL isn't reachable (only used for optional
   persistence, everything else still works over RabbitMQ).
 - **`mvn test` fails with a specific test name** - scroll up from the failure to find the actual
   assertion that failed; the test names describe what they check (e.g.
   `alertMissingRequiredFieldsIsLoggedAndDropped`).
-- **Port 8481 already in use** - something else on your machine is using that UDP port; either
-  free it or change `maltrail.udp_port` in
-  `user-defined-modules\config\maltrail-module.properties` (and pass `--port` to
-  `send_test_maltrail_event.py` to match).
+- **Permission denied running `rabbitmqctl`** - prefix with `sudo`, as shown above.
+- **Port 8481 (Maltrail) or 8482 (Sysmon) already in use** - check what's using it with
+  `sudo ss -tulpn | grep 8481` (or `8482`); either free it or change `maltrail.udp_port` /
+  `sysmon.udp_port` in the corresponding `user-defined-modules/config/*.properties` file (and
+  pass `--maltrail-port`/`--sysmon-port` to `simulate_all_sources.py` to match).
+- **Fail2ban events never arrive** - `Fail2banModule` tails whatever `fail2ban.log_path` points
+  at in `user-defined-modules/config/fail2ban-module.properties` (default:
+  `simulated_logs/fail2ban.log`, relative to wherever the module was launched from - i.e.
+  `user-defined-modules/`). Make sure `simulate_all_sources.py --source fail2ban` is writing to
+  that exact same path (`--fail2ban-log-path`, relative to wherever *you* run the script from).
+- **You copied the project over from Windows and file paths/line endings look weird** - shouldn't
+  affect anything in this guide (Java/Maven/Python all handle CRLF line endings in text files
+  fine), but if a `.sh` script itself fails with `bad interpreter` or `\r` errors, run
+  `dos2unix start-all.sh` (or `sed -i 's/\r$//' start-all.sh`) to fix its line endings.
