@@ -10,18 +10,22 @@ actually used.
 
 **How to read this document.** Part 1 explains how the SDK works, from scratch, with real code.
 Part 2 gives an explicit verdict on how effective it is. Part 3 applies the Cognitive Dimensions
-framework, dimension by dimension, with file/line evidence. Part 4 checks the SDK against a
-practical modern-API ergonomics checklist. Every claim of fact is backed by a specific file and
-line reference; every judgment is stated as a judgment, not disguised as one.
+framework, dimension by dimension, with file/line evidence. Part 3.5 is a deep dive into the
+single root cause behind the four dimensions Part 3 leaves MIXED/FAIL, the concrete fix for it,
+and a grounded risk assessment for why that fix hasn't been made yet. Part 4 checks the SDK
+against a practical modern-API ergonomics checklist. Part 5 lists prioritized recommendations for
+future work. Every claim of fact is backed by a specific file and line reference; every judgment
+is stated as a judgment, not disguised as one.
 
 **Revision note.** This is a two-pass document. The first pass scored the SDK at 1 PASS / 5
 MIXED / 6 FAIL across the 12 Cognitive Dimensions. A second, targeted round of work then fixed
 six of those issues with real, verified code changes (not just re-wording) — Part 3's summary
-table and each affected dimension now show both the original verdict and the fix. Three
-dimensions were left MIXED/FAIL by **explicit, documented decision**, not oversight: fixing them
-requires replacing `SdkModuleHost`'s hardcoded embedded-module list and hardcoded dispatch logic,
-which was judged too close to `OpenDaylightModule`'s live SDN mitigation routing to risk without a
-dedicated regression-testing pass of its own.
+table and each affected dimension now show both the original verdict and the fix. Four
+dimensions (#3, #4, #6, #9) were left MIXED/FAIL by **explicit, documented decision**, not
+oversight: fixing them requires replacing `SdkModuleHost`'s hardcoded embedded-module list and
+hardcoded dispatch logic, which was judged too close to `OpenDaylightModule`'s live SDN mitigation
+routing to risk without a dedicated regression-testing pass of its own. Part 3.5 documents the
+root cause, the concrete fix, and a full risk assessment for why it wasn't attempted this round.
 
 ---
 
@@ -321,8 +325,9 @@ not softened into "an opportunity."
 
 **Summary**
 
-*Updated after a targeted round of fixes. 7 of 12 now PASS (was 1/12). The 3 dimensions left
-MIXED/FAIL were left that way by explicit decision — see each section for why — not missed.*
+*Updated after a targeted round of fixes. 8 of 12 now PASS (was 1/12). The 4 dimensions left
+MIXED/FAIL (#3, #4, #6, #9) were left that way by explicit decision — see each section for why,
+and Part 3.5 for a full root-cause/fix/risk deep dive — not missed.*
 
 | # | Dimension | Verdict |
 |---|---|---|
@@ -339,7 +344,7 @@ MIXED/FAIL were left that way by explicit decision — see each section for why 
 | 11 | Role Expressiveness | **PASS** *(was FAIL)* — all 3 concrete instances fixed with typed replacements |
 | 12 | Domain Correspondence | **PASS** — the one dimension without a real complaint (unchanged) |
 
-**On the 3 that stayed MIXED/FAIL (#3, #4, #6, and #9's embedded-path half):** all four trace back
+**On the 4 that stayed MIXED/FAIL (#3, #4, #6, and #9):** all four trace back
 to the same root cause — `SdkModuleHost`'s hardcoded embedded-module list and hardcoded
 per-event-type `dispatch()` branches. Fixing that root cause properly requires replacing it with
 a generic discovery/dispatch mechanism, which was explicitly scoped **out** of this round because
@@ -615,6 +620,121 @@ inconsistency any less real.
 
 ---
 
+# Part 3.5 — Deep Dive: The One Fix Behind Dimensions #3, #4, #6, #9
+
+Dimensions #3 (Working Framework, MIXED), #4 (Work-Step Unit, MIXED), #6 (Premature Commitment,
+FAIL), and #9 (API Viscosity, FAIL) are not four independent problems. They are four different
+symptoms of one root cause. This section documents that root cause, the concrete fix for it, and
+— since the fix was deliberately not attempted in this round — a specific, code-grounded risk
+assessment for why, so a future contributor can pick this up without re-deriving any of this from
+scratch.
+
+## Root cause
+
+[`SdkModuleHost.java`](ModuleRegistryLifecycleManager/src/main/java/com/yourorg/registry/SdkModuleHost.java)
+has two hardcoded chokepoints every embedded module must pass through:
+
+1. **`initializeModules()` (lines 311-317)** — a fixed 4-line list:
+   ```java
+   public void initializeModules() {
+       initializeSingleModule("com.nis1.thesis.udm.OpenDaylightModule", api);
+       initializeSingleModule("com.nis1.thesis.udm.SuricataHttpModule", api);
+       initializeSingleModule("com.nis1.thesis.udm.ZeekHttpModule", api);
+       initializeSingleModule("com.nis1.thesis.udm.NotificationModule", api);
+   }
+   ```
+   Adding a fifth embedded module means editing this method — a file its author didn't write.
+2. **`dispatch()` / `mapMessageTypeToEventType()` (lines 143-212)** — an `if/else` chain that
+   decides *how to build a payload object* by string-matching `message_type`/`event_type`
+   (`INITIATE_MITIGATION`, `REMOVE_MITIGATION`, `INSTALL_PROACTIVE_POLICY`, `SEND_NOTIFICATION`,
+   `ODL_TOPOLOGY_DISCOVER`, `odl.*`). A new embedded module that needs a new event type must add a
+   new branch here too.
+
+Each dimension is this same fact, viewed through a different lens: it's forced, hard-to-reverse
+(#6 Premature Commitment); it makes a small addition ripple into shared, order-sensitive code (#9
+API Viscosity); it means "add one module" is not a self-contained unit of change (#4 Work-Step
+Unit); and it means understanding a new module requires first understanding this shared file (#3
+Working Framework).
+
+## The fix
+
+**A. Replace the hardcoded module list with `ServiceLoader` discovery.** Each embedded module
+ships a `META-INF/services/com.nis1.thesis.sdk.PluggableModule` file naming itself;
+`initializeModules()` becomes `ServiceLoader.load(PluggableModule.class).forEach(...)`. Adding a
+module becomes "add a JAR + one manifest entry" — zero edits to `SdkModuleHost.java`, matching the
+standalone pattern's zero-shared-file-changes property exactly.
+
+**B. Replace the hardcoded dispatch chain with a registered-strategy map.** Instead of `dispatch()`
+deciding payload deserialization itself, let each module register its own
+`(eventType -> payload-builder)` entries during its own `initialize()` — the same place it already
+calls `api.subscribeToEvent(...)`. `dispatch()` becomes a generic map lookup. The existing 6
+branches get migrated in as the current modules' own registrations, so behavior is unchanged;
+`mapMessageTypeToEventType`'s string table is pure data and can move verbatim.
+
+## Why this was scoped out of this round: risk assessment
+
+This is not a generic "refactoring is risky" caveat — these are specific properties of this
+codebase that make this particular change dangerous in ways the six fixes already shipped were
+not.
+
+1. **The two hardcoded lists agree only by convention, not by enforcement, and the refactor could
+   silently break that link.** `CommandRoutingListener` calls
+   `registry.findModuleByCapability(command)` to pick *where* to route a command, then
+   `sdkModuleHost.dispatch(json)` to actually build the payload. These are two independently
+   hardcoded things kept in sync today only because whoever wrote them was careful. If the new
+   registered-strategy map and a module's declared capabilities fall out of sync during migration,
+   `dispatch()`'s existing catch-all (line 183) just logs and returns — and if `payload` stays
+   `null`, line 171 (`if (payload != null)`) exits with **no exception at all**. A command gets
+   routed to a module that can no longer deserialize it, and nothing crashes. That is a strictly
+   worse failure mode than today's, and it is specific to how this method is written.
+2. **Blast radius covers all 4 embedded modules simultaneously.** Each of the six fixes already
+   made touched 1-3 files on one call path. This change replaces the shared init/dispatch
+   mechanism `OpenDaylightModule`, `SuricataHttpModule`, `ZeekHttpModule`, and `NotificationModule`
+   all depend on — a mistake here can affect three modules that were never directly touched.
+3. **The live consequence is SDN state, and it can fail in either direction.**
+   `parseMitigationCommand` (lines 214-298) feeds `OpenDaylightModule`'s actual isolate/rollback
+   logic. A bug here can fail-closed (a real detection never gets isolated) or fail-open (a
+   contained host never gets rolled back, or a `containArp`/`containDhcp` default silently flips —
+   the exact `Boolean`-vs-`boolean` trap this session already caught once, recreated in a new
+   spot if a field is missed during migration).
+4. **`ServiceLoader` ordering is not guaranteed, and today's fixed order is not proven safe to
+   change.** `initializeModules()` currently runs a fixed sequence
+   (`OpenDaylightModule` → `SuricataHttpModule` → `ZeekHttpModule` → `NotificationModule`).
+   `ServiceLoader` iteration order depends on classpath/JAR-manifest layout and carries no
+   ordering contract. Nothing obvious depends on the current order, but "nothing obvious" is not
+   the same as "proven absent" — this refactor is the thing that would find out.
+5. **The riskiest part likely can't be fully verified in this development environment.** There is
+   no live OpenDaylight controller or RabbitMQ broker available here (the same gap already noted
+   for the Penetrability fix in §7). Verification would lean on JUnit characterization tests and
+   code review; the real proof only comes from running it against the actual controller in the
+   Ubuntu deployment — meaning a mistake may not surface until that later, harder-to-debug
+   environment.
+6. **It's a schedule/effort bet independent of the code risk.** This is thesis work on a branch
+   that already has a complete testing guide and a documented, deliberately-scoped set of known
+   limitations. A structural refactor of this size, this late, trades a known and already-defensible
+   limitation for a chance at 2-4 more PASS marks, at the cost of everything above.
+
+## A safer migration plan, if this is picked up later
+
+1. **Write characterization tests first**, before changing anything — one JUnit test per existing
+   `message_type`/`event_type` combination currently handled in `dispatch()`, asserting today's
+   exact output payload, so parity is checked mechanically rather than by inspection.
+2. **Migrate the lowest-risk branch first** (`SEND_NOTIFICATION` — newest, least consequential),
+   confirm tests stay green, then `INSTALL_PROACTIVE_POLICY`, and only then `INITIATE_MITIGATION`/
+   `REMOVE_MITIGATION` last, since those are `OpenDaylightModule`'s live path.
+3. **Keep `mapMessageTypeToEventType`'s string-matching table verbatim** — it is data, not logic,
+   and can move into each module's own registration without any behavioral change.
+4. **Add a startup-time guard**: if `ServiceLoader` finds zero modules (e.g. a missing manifest
+   entry), fail loudly rather than silently running with no embedded modules registered.
+5. **Full regression before shipping**: the existing 35 JUnit tests, the new characterization
+   tests, and a live-RabbitMQ pass through Tier 3 of `TESTING_GUIDE.md` that specifically exercises
+   an OpenDaylight isolate + rollback command end-to-end — not just a compile check.
+
+Done this way, this single change is expected to flip all four dimensions (#3, #4, #6, #9) at
+once — taking this audit from 8/12 to potentially 11 or 12/12 — not just clear the two FAILs.
+
+---
+
 # Part 4 — API Ergonomics & Cognitive Load Checklist
 
 **Are method names predictable and native to the language ecosystem?**
@@ -639,6 +759,48 @@ sensible built-in defaults rather than failing to start (confirmed directly:
 `SuricataModule.loadConfig()`, `MaltrailModule.loadConfig()`, and this round's
 `Fail2banModule`/`SysmonModule` all follow this pattern). A user genuinely can start a module with
 zero configuration and get reasonable behavior — no 10-flags-to-start problem here.
+
+---
+
+# Part 5 — Future Recommendations
+
+Prioritized, in the order they'd be worth doing. Each ties back to specific evidence earlier in
+this document rather than being a generic best-practice suggestion.
+
+**1. Replace `SdkModuleHost`'s hardcoded module list and dispatch chain (highest priority).**
+The single highest-leverage change available: one fix that would flip four dimensions at once
+(#3, #4, #6, #9 — see Part 3.5 for the full root cause, fix design, and risk assessment).
+Prerequisite before attempting it: build the characterization-test suite described in Part 3.5's
+migration plan, since none of it exists yet and the current dispatch behavior has no test coverage
+of its own to protect against regressions.
+
+**2. Replace `WorkflowMatcher`/`WorkflowLoader`'s hand-rolled string scanner with a real parser.**
+`WorkflowLoader`'s own class comment already admits this ("a simplified implementation... For
+production, consider using SnakeYAML"), and §1.7/Part 2 document two real bugs this caused this
+session alone: the non-recursive directory scan that silently hid two new workflow files, and the
+`==`/`!=` case-sensitivity asymmetry (now fixed, but symptomatic of a scanner with no formal
+grammar). A real expression parser (or adopting SnakeYAML for the loader, plus a small expression
+library — e.g. SpEL or a hand-written recursive-descent parser — for conditions) would remove this
+entire class of silent-mismatch bug rather than patching instances of it one at a time.
+
+**3. Add native async support to `CoreSystemApi`.** Documented as a clean miss in Part 4:
+`publishEvent`/`subscribeToEvent` are fully synchronous with no `CompletableFuture` or reactive
+variant anywhere in `nis-thesis-sdk`, forcing every module to hand-roll its own concurrency. Adding
+an async publish path (even a simple `CompletableFuture<Void> publishEventAsync(Event<?>)`) would
+close this gap without breaking the existing synchronous API.
+
+**4. Live-verify the `moduleHealthService.js` Postgres integration end-to-end.** The Penetrability
+fix (§7 in Part 3) was verified by code review and `node --check` syntax validation only — there
+was no live Postgres instance or running webapp available in this development environment to
+exercise the actual query against real data. Before relying on this in production, run it against
+a real `registered_modules` table with at least one embedded and one standalone module registered,
+and confirm the webapp's `Modules.js` capabilities column renders correctly for both.
+
+**5. Do not attempt Recommendation #1 without Recommendation #1's own prerequisite.** Worth
+stating explicitly since it's the highest-value item on this list: skipping the characterization
+tests to save time is exactly the shortcut that turns a "small, well-understood change" into the
+kind of high-viscosity, hard-to-reverse mistake this whole document is about. The risk section in
+Part 3.5 is written to be read in full before starting, not skimmed.
 
 ---
 
