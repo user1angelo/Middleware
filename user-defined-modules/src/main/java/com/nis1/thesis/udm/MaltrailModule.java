@@ -303,6 +303,9 @@ public class MaltrailModule {
                         DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                         udpSocket.receive(packet);
                         String jsonPacket = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+                        System.out.println("[TEMP-DEBUG] receive() returned " + packet.getLength()
+                                + " bytes from " + packet.getAddress() + ":" + packet.getPort()
+                                + " -> [" + jsonPacket + "]");
                         try {
                             parseMaltrailPacket(jsonPacket, channel);
                         } catch (Exception e) {
@@ -332,11 +335,16 @@ public class MaltrailModule {
         try {
             // Validate JSON structure before parsing
             if (!jsonPacket.trim().startsWith("{") || !jsonPacket.trim().endsWith("}")) {
+                System.out.println("[TEMP-DEBUG] rejected: does not look like a JSON object "
+                        + "(trim().startsWith('{')=" + jsonPacket.trim().startsWith("{")
+                        + ", endsWith('}')=" + jsonPacket.trim().endsWith("}") + ")");
                 return;
             }
 
             // Parse the Maltrail UDP event
             MaltrailEvent event = gson.fromJson(jsonPacket, MaltrailEvent.class);
+            System.out.println("[TEMP-DEBUG] parsed OK - srcIp=" + event.srcIp
+                    + " dstIp=" + event.dstIp + " severity=" + event.severity + " info=" + event.info);
 
             // Validate essential fields
             if (event.srcIp == null || event.dstIp == null) {
@@ -350,6 +358,8 @@ public class MaltrailModule {
             publishMaltrailAlert(event, channel);
 
         } catch (Exception e) {
+            System.out.println("[TEMP-DEBUG] EXCEPTION in parseMaltrailPacket: " + e);
+            e.printStackTrace();
             System.err.println("❌ Failed to parse Maltrail UDP packet: " + e.getMessage());
         }
     }
