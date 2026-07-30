@@ -83,6 +83,11 @@ body {
   flex: 1;
   padding: 32px;
   max-width: 1400px;
+  min-width: 0; /* flex items default to min-width:auto, which refuses to shrink below a
+                   descendant's content-based minimum size - without this, a wide, unwrapped
+                   element (e.g. a long code sample) forces this box past the viewport instead
+                   of scrolling within itself. Verified this has no effect on pages that don't
+                   already hit that case. */
 }
 
 .page-header {
@@ -374,4 +379,118 @@ body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* SDK Documentation pages only (scoped so it never affects other pages that
+   happen to reuse a class name, e.g. NetworkControl.js's own .data-table) */
+
+.sdk-docs-page .tab-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sdk-docs-page .tab-link {
+  padding: 10px 16px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.sdk-docs-page .tab-link:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.sdk-docs-page .tab-link.active {
+  background: var(--accent);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.sdk-docs-page h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-top: 28px;
+  margin-bottom: 12px;
+}
+
+.sdk-docs-page h2:first-child {
+  margin-top: 0;
+}
+
+.sdk-docs-page h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 22px;
+  margin-bottom: 10px;
+}
+
+.sdk-docs-page p {
+  margin-bottom: 12px;
+}
+
+.sdk-docs-page ol,
+.sdk-docs-page ul {
+  padding-left: 24px;
+  margin-bottom: 16px;
+}
+
+.sdk-docs-page li {
+  margin-bottom: 8px;
+}
+
+.sdk-docs-page li:last-child {
+  margin-bottom: 0;
+}
+
+.sdk-docs-page li ul,
+.sdk-docs-page li ol {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.sdk-docs-page pre.code-block {
+  display: block;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 16px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.sdk-docs-page .table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.sdk-docs-page table.data-table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+}
+
+.sdk-docs-page table.data-table th,
+.sdk-docs-page table.data-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: top;
+}
+
+.sdk-docs-page table.data-table th {
+  color: var(--text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
 }

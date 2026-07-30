@@ -259,7 +259,7 @@ embedded and starts automatically inside ModuleRegistry (Terminal 1), the same w
 `OpenDaylightModule` does.
 
 **Terminal 1 - ModuleRegistry** (routes commands to modules, hosts the embedded
-`NotificationModule`):
+`NotificationModule`, `OpenDaylightModule`, `SuricataHttpModule`, and `ZeekHttpModule`):
 ```bash
 cd "$REPO/ModuleRegistryLifecycleManager"
 java -cp "target/classes:lib/*:../nis-thesis-sdk/target/classes:../user-defined-modules/target/classes:../user-defined-modules/*" com.yourorg.registry.ModuleRegistryMain
@@ -268,6 +268,14 @@ Wait for: `✅ ModuleRegistryAndLifecycleManager is running`. You'll also see a 
 `❌ Failed to load modules from database` line - that's expected and harmless, it's just
 Postgres being unreachable (see "What you need" above). You should also see
 `[SdkModuleHost] Initialized module: Notification Module` in the startup log.
+
+**Note on Suricata/Zeek:** unlike Maltrail/Fail2ban/Sysmon below, Suricata and Zeek do **not**
+get their own terminal - `SuricataHttpModule`/`ZeekHttpModule` are embedded modules that start
+automatically here in Terminal 1, each running its own tiny HTTP server (port 8090
+`/suricata/alerts`, port 8091 `/zeek/notices`). In the real deployment those ports are fed by
+`ids_http_forwarder.py` running on the separate VM that hosts Suricata/Zeek/OVS; for this guide,
+`simulate_all_sources.py --source suricata`/`--source zeek` POSTs directly to those same
+endpoints instead, once Terminal 1 is up.
 
 **Terminal 2 - WorkflowEngine** (matches alerts against workflow YAML files):
 ```bash
@@ -309,16 +317,19 @@ If any of these fail immediately with a connection error, RabbitMQ isn't reachab
 > manually as shown above. It also assumes RabbitMQ is already running - step 3.1 still applies
 > first.
 
-### 3.3 Send simulated events from all four sources
+### 3.3 Send simulated events from all five sources
 
 One script covers every source - in a **sixth** terminal:
 ```bash
 cd "$REPO"
 python3 scripts/simulate_all_sources.py --source all
 ```
-Or trigger just one at a time: `--source maltrail`, `--source fail2ban`, `--source sysmon`, or
-`--source suricata` (this last one needs `--eve-path` pointed at wherever `SuricataModule` is
-configured to tail, since its default is the real `/var/log/suricata/eve.json` path).
+Or trigger just one at a time: `--source maltrail`, `--source fail2ban`, `--source sysmon`,
+`--source suricata`, or `--source zeek`. The last two POST directly to `SuricataHttpModule`/
+`ZeekHttpModule`'s HTTP endpoints already running inside Terminal 1 (defaults
+`http://localhost:8090/suricata/alerts` and `http://localhost:8091/zeek/notices` need no flags
+normally - override with `--suricata-http-url`/`--zeek-http-url` only if Terminal 1 is running
+somewhere other than localhost).
 
 **What success looks like**, watching the terminals from step 3.2:
 
@@ -431,6 +442,14 @@ docker rm rabbitmq
   `simulated_logs/fail2ban.log`, relative to wherever the module was launched from - i.e.
   `user-defined-modules/`). Make sure `simulate_all_sources.py --source fail2ban` is writing to
   that exact same path (`--fail2ban-log-path`, relative to wherever *you* run the script from).
+- **`simulate_all_sources.py --source suricata`/`--source zeek` prints "FAILED to reach ..."** -
+  Terminal 1 (ModuleRegistry) isn't running yet, or isn't reachable on port 8090/8091 from
+  wherever you're running the script. These two sources are HTTP-based (`SuricataHttpModule`/
+  `ZeekHttpModule`'s own embedded HTTP servers, started inside ModuleRegistry, not a separate
+  process) - unlike Maltrail/Fail2ban/Sysmon, appending to a local file or sending raw UDP does
+  nothing for these two; a real Suricata/Zeek deployment reaches these same endpoints via
+  `ids_http_forwarder.py` running on a separate machine, not by writing to a local log file on
+  this one.
 - **You copied the project over from Windows and file paths/line endings look weird** - shouldn't
   affect anything in this guide (Java/Maven/Python all handle CRLF line endings in text files
   fine), but if a `.sh` script itself fails with `bad interpreter` or `\r` errors, run

@@ -16,7 +16,7 @@ const SdkDocs = () => {
   ];
 
   return (
-    <div>
+    <div className="sdk-docs-page">
       <div className="page-header">
         <h1 className="page-title">SDK Documentation</h1>
         <p className="page-subtitle">

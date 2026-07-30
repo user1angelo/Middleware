@@ -166,7 +166,8 @@ const SdkCoreApi = () => {
         type <code>ModuleHelper</code> doesn't wrap.
       </p>
 
-      <table className="data-table" style={{ marginBottom: '16px' }}>
+      <div className="table-scroll" style={{ marginBottom: '16px' }}>
+      <table className="data-table">
         <thead>
           <tr><th>Class</th><th>Fields</th><th>Notes</th></tr>
         </thead>
@@ -208,6 +209,7 @@ const SdkCoreApi = () => {
           </tr>
         </tbody>
       </table>
+      </div>
 
       <h3>Built-in Observability &amp; Testing Tools</h3>
       <p>
