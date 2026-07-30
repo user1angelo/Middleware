@@ -287,14 +287,14 @@ Wait for: `⏳ Waiting for alerts from queue: workflow_queue`.
 **Terminal 3 - MaltrailModule** (listens for UDP events, publishes alerts):
 ```bash
 cd "$REPO/user-defined-modules"
-java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.MaltrailModule
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*:../nis-thesis-sdk/target/classes" com.nis1.thesis.udm.MaltrailModule
 ```
 Wait for: `✅ Maltrail UDP listener bound to port 8481`.
 
 **Terminal 4 - Fail2banModule** (tails a simulated fail2ban.log, publishes alerts):
 ```bash
 cd "$REPO/user-defined-modules"
-java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.Fail2banModule
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*:../nis-thesis-sdk/target/classes" com.nis1.thesis.udm.Fail2banModule
 ```
 Wait for: `✅ Monitoring started from position:`. This module creates
 `user-defined-modules/simulated_logs/fail2ban.log` itself if it doesn't already exist - no real
@@ -303,9 +303,21 @@ fail2ban install needed.
 **Terminal 5 - SysmonModule** (listens for UDP Sysmon-shaped JSON, publishes alerts):
 ```bash
 cd "$REPO/user-defined-modules"
-java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.SysmonModule
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*:../nis-thesis-sdk/target/classes" com.nis1.thesis.udm.SysmonModule
 ```
 Wait for: `✅ Sysmon UDP listener bound to port 8482`.
+
+> **Classpath note:** all three commands above need `../nis-thesis-sdk/target/classes` explicitly -
+> `AlertEnvelopeBuilder` (used by every one of these modules to build its alert envelope) lives in
+> `nis-thesis-sdk`, which is only a Maven *compile-time* dependency here, never copied into
+> `user-defined-modules/target/classes` or into `ModuleRegistryLifecycleManager/lib/`. Omitting it
+> doesn't fail loudly: the module starts, binds its port/file-tail fine, and even successfully
+> receives and parses events - it only dies (silently - a bare `NoClassDefFoundError`, an `Error`
+> not an `Exception`, thrown from a background thread whose `ExecutorService.submit(...)` result is
+> never checked) the first time it actually tries to build and publish an alert. Symptom: the
+> module's own debug/receive logging looks totally healthy, but nothing ever reaches
+> `workflow_queue` and every event after the first is silently dropped, because the listener thread
+> that would have processed it is already dead.
 
 If any of these fail immediately with a connection error, RabbitMQ isn't reachable - go back to
 3.1.

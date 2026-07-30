@@ -84,17 +84,17 @@ MR_PID=$!
 
 echo "🚀 [4/8] Starting Maltrail Module (UDP listener, port 8481)..."
 cd "$SCRIPT_DIR/user-defined-modules"
-java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.MaltrailModule > /dev/null 2>&1 &
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*:../nis-thesis-sdk/target/classes" com.nis1.thesis.udm.MaltrailModule > /dev/null 2>&1 &
 MALTRAIL_PID=$!
 
 echo "🚀 [5/8] Starting Fail2ban Module (tails simulated_logs/fail2ban.log)..."
 cd "$SCRIPT_DIR/user-defined-modules"
-java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.Fail2banModule > /dev/null 2>&1 &
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*:../nis-thesis-sdk/target/classes" com.nis1.thesis.udm.Fail2banModule > /dev/null 2>&1 &
 FAIL2BAN_PID=$!
 
 echo "🚀 [6/8] Starting Sysmon Module (UDP listener, port 8482)..."
 cd "$SCRIPT_DIR/user-defined-modules"
-java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.SysmonModule > /dev/null 2>&1 &
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*:../nis-thesis-sdk/target/classes" com.nis1.thesis.udm.SysmonModule > /dev/null 2>&1 &
 SYSMON_PID=$!
 
 echo "🚀 [7/8] Starting Web Dashboard Backend..."
