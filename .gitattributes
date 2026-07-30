@@ -1,0 +1,11 @@
+# This project is deployed and run on Ubuntu. Force LF line endings for anything that gets
+# executed as a script or read by a shell/interpreter, regardless of core.autocrlf on whichever
+# machine (Windows or otherwise) someone happens to be editing from - a CRLF shebang line
+# ("#!/bin/bash\r") fails on Linux with "bad interpreter: No such file or directory" before the
+# script even runs. This exact issue hit every .sh file in this repo on a Windows dev machine
+# with core.autocrlf=true and no .gitattributes to override it.
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.properties text eol=lf
