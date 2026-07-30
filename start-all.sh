@@ -56,29 +56,48 @@ compile_java_module "$SCRIPT_DIR/WorkflowEngine" "lib/*:target/classes"
 cleanup() {
     echo ""
     echo "🛑 Stopping all services..."
-    kill $TCS_PID $WE_PID $MR_PID $BACKEND_PID $FRONTEND_PID 2>/dev/null
-    wait $TCS_PID $WE_PID $MR_PID $BACKEND_PID $FRONTEND_PID 2>/dev/null
+    kill $TCS_PID $WE_PID $MR_PID $MALTRAIL_PID $FAIL2BAN_PID $SYSMON_PID $BACKEND_PID $FRONTEND_PID 2>/dev/null
+    wait $TCS_PID $WE_PID $MR_PID $MALTRAIL_PID $FAIL2BAN_PID $SYSMON_PID $BACKEND_PID $FRONTEND_PID 2>/dev/null
     echo "✅ System safely shut down."
     exit 0
 }
 trap cleanup SIGINT SIGTERM
 
-echo "🚀 [1/5] Starting Threat Context Store..."
+echo "🚀 [1/8] Starting Threat Context Store..."
 cd "$SCRIPT_DIR/ThreatContextStore"
 java -cp "target/classes:lib/*" com.yourorg.middleware.ThreatContextStoreMain > /dev/null 2>&1 &
 TCS_PID=$!
 
-echo "🚀 [2/5] Starting Workflow Engine..."
+echo "🚀 [2/8] Starting Workflow Engine..."
 cd "$SCRIPT_DIR/WorkflowEngine"
 java -cp "target/classes:lib/*" com.yourorg.workflow.WorkflowEngineMain > /dev/null 2>&1 &
 WE_PID=$!
 
-echo "🚀 [3/5] Starting Module Registry (Loading ZeekHttpModule!)..."
+echo "🚀 [3/8] Starting Module Registry (Loading OpenDaylightModule, SuricataHttpModule, ZeekHttpModule, NotificationModule)..."
 cd "$SCRIPT_DIR/ModuleRegistryLifecycleManager"
 java -cp "target/classes:lib/*:../nis-thesis-sdk/target/classes:../user-defined-modules/target/classes:../user-defined-modules/*" com.yourorg.registry.ModuleRegistryMain > /dev/null 2>&1 &
 MR_PID=$!
 
-echo "🚀 [4/5] Starting Web Dashboard Backend..."
+# The three modules below are standalone processes (their own main(), their own RabbitMQ
+# connection) - they are NOT loaded by Module Registry above, unlike the embedded modules in
+# step 3. Each registers itself with Module Registry over RabbitMQ once it's up.
+
+echo "🚀 [4/8] Starting Maltrail Module (UDP listener, port 8481)..."
+cd "$SCRIPT_DIR/user-defined-modules"
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.MaltrailModule > /dev/null 2>&1 &
+MALTRAIL_PID=$!
+
+echo "🚀 [5/8] Starting Fail2ban Module (tails simulated_logs/fail2ban.log)..."
+cd "$SCRIPT_DIR/user-defined-modules"
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.Fail2banModule > /dev/null 2>&1 &
+FAIL2BAN_PID=$!
+
+echo "🚀 [6/8] Starting Sysmon Module (UDP listener, port 8482)..."
+cd "$SCRIPT_DIR/user-defined-modules"
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.SysmonModule > /dev/null 2>&1 &
+SYSMON_PID=$!
+
+echo "🚀 [7/8] Starting Web Dashboard Backend..."
 cd "$SCRIPT_DIR/webapp/backend"
 npm install --silent > /dev/null 2>&1
 npm start > /dev/null 2>&1 &
@@ -86,7 +105,7 @@ BACKEND_PID=$!
 
 sleep 2
 
-echo "🚀 [5/5] Starting Web Dashboard Frontend..."
+echo "🚀 [8/8] Starting Web Dashboard Frontend..."
 cd "$SCRIPT_DIR/webapp/frontend"
 npm install --silent > /dev/null 2>&1
 PORT=3000 npm start &

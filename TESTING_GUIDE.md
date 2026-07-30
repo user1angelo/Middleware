@@ -310,12 +310,14 @@ Wait for: `✅ Sysmon UDP listener bound to port 8482`.
 If any of these fail immediately with a connection error, RabbitMQ isn't reachable - go back to
 3.1.
 
-> **Shortcut:** `$REPO/start-all.sh` already automates starting ModuleRegistry, WorkflowEngine,
-> ThreatContextStore, and the web dashboard together (it's the repo's own launcher, written for
-> this exact Linux setup). It does **not** yet know about MaltrailModule/Fail2banModule/
-> SysmonModule (all added after it was written), so if you use it, still start Terminals 3-5
-> manually as shown above. It also assumes RabbitMQ is already running - step 3.1 still applies
-> first.
+> **Shortcut:** `$REPO/start-all.sh` automates starting ThreatContextStore, WorkflowEngine,
+> ModuleRegistry (with its embedded modules), **and now MaltrailModule/Fail2banModule/
+> SysmonModule too**, plus the web dashboard - all in one command, each redirected to
+> `/dev/null` so it runs quietly in the background (Ctrl+C stops everything together). It still
+> assumes RabbitMQ is already running - step 3.1 still applies first. Only use the manual
+> Terminals 1-5 above instead if you want to see each module's own console output directly (e.g.
+> to confirm a specific `✅ ... bound to port ...` startup line), since `start-all.sh` hides that
+> output by design.
 
 ### 3.3 Send simulated events from all five sources
 
