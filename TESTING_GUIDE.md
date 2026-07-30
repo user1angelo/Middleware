@@ -160,12 +160,12 @@ No live system needed - this uses one tiny fake CSV file.
 cd "$REPO"
 mkdir -p scratch_test
 cat > scratch_test/benchmark_run_test.csv << 'EOF'
-traceId,stage,startEpochMs,endEpochMs,durationMs
-alert-1,consume_deserialize,1000,1005,5
-alert-1,workflow_load,1005,1050,45
-alert-1,policy_match,1050,1060,10
-alert-1,command_dispatch,1060,1075,15
-alert-1,registry_route_dispatch,1075,1090,15
+traceId,stage,startTime,endTime,durationMs
+alert-1,consume_deserialize,2026-07-30 14:00:01.000,2026-07-30 14:00:01.005,5
+alert-1,workflow_load,2026-07-30 14:00:01.005,2026-07-30 14:00:01.050,45
+alert-1,policy_match,2026-07-30 14:00:01.050,2026-07-30 14:00:01.060,10
+alert-1,command_dispatch,2026-07-30 14:00:01.060,2026-07-30 14:00:01.075,15
+alert-1,registry_route_dispatch,2026-07-30 14:00:01.075,2026-07-30 14:00:01.090,15
 EOF
 
 python3 scripts/summarize_benchmark.py scratch_test/benchmark_run_test.csv

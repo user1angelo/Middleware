@@ -2,7 +2,9 @@
 """
 Summarize StageTimer benchmark CSVs produced by nis-thesis-sdk's StageTimer utility.
 
-Each input CSV has rows: traceId,stage,startEpochMs,endEpochMs,durationMs
+Each input CSV has rows: traceId,stage,startTime,endTime,durationMs
+(startTime/endTime are human-readable "yyyy-MM-dd HH:mm:ss.SSS" timestamps, JVM default time
+zone - durationMs is still a plain millisecond integer, which is all this script uses for stats)
 
 Usage:
     python scripts/summarize_benchmark.py <csv-or-dir> [<csv-or-dir> ...]

@@ -65,27 +65,74 @@ const SdkOverview = () => {
       <ol>
         <li>
           <strong>Pick a use case.</strong> For example: "When a high severity alert appears,
-          call an external API and publish an enrichment result." 
+          call an external API and publish an enrichment result."
         </li>
         <li>
-          <strong>Create a new <code>*Module.java</code> class</strong> under
-          <code>com.nis1.thesis.udm</code> that implements <code>PluggableModule</code>.
+          <strong>Choose a pattern.</strong> Embedded (implements <code>PluggableModule</code>,
+          shown above) requires editing a shared file to register your module - standalone (own
+          <code>main()</code>) doesn't. <strong>If you're unsure, start with standalone</strong> -
+          see the walkthrough below and the Patterns tab's full comparison.
         </li>
         <li>
-          <strong>Use <code>CoreSystemApi</code> to subscribe</strong> to the events you care about,
-          such as <code>alerts.host.wazuh</code> or <code>enrichment.request.ip</code>.
+          <strong>Use <code>CoreSystemApi</code> to subscribe</strong> (embedded) or your own
+          RabbitMQ channel (standalone) for the events you care about, such as
+          <code>alerts.network.maltrail</code> or <code>enrichment.request.ip</code>.
         </li>
         <li>
           <strong>Define a payload class</strong> that represents the data you want to send
-          (e.g. <code>IpReputationData</code> or <code>WazuhAlertPayload</code>).
+          (e.g. <code>IpReputationData</code> or <code>MaltrailAlertData</code>), and build your
+          alert envelope with <code>AlertEnvelopeBuilder</code> (Core API Reference tab).
         </li>
         <li>
           <strong>Publish events</strong> back into the system using
-          <code>Event.of("event.type", payload)</code> and <code>api.publishEvent(...)</code>.
+          <code>Event.of("event.type", payload)</code> and <code>api.publishEvent(...)</code>
+          (embedded), or <code>channel.basicPublish(...)</code> (standalone).
+        </li>
+      </ol>
+
+      <h3>Your First Module, End to End</h3>
+      <p>
+        Rather than a hypothetical example, this walks through a real module that's already built,
+        tested, and running in this repo - <code>Fail2banModule</code> (the simplest of the four
+        standalone modules: it tails a log file and publishes an alert on a match). Every command
+        below has actually been run against this exact codebase.
+      </p>
+      <ol>
+        <li>
+          <strong>Read the real source first.</strong>
+          <code>user-defined-modules/src/main/java/com/nis1/thesis/udm/Fail2banModule.java</code> -
+          notice it has its own <code>main()</code>, its own RabbitMQ connection, and no
+          <code>PluggableModule</code> in sight. That's the standalone pattern.
         </li>
         <li>
-          <strong>Package your module as a JAR</strong> and drop it in the directory that the
-          Lifecycle Manager scans for plugins (typically <code>user-defined-modules/</code>).
+          <strong>Compile and test it</strong> - Maven already knows about every dependency, so no
+          manual classpath is needed for this step:
+          <pre className="code-block" style={{ marginTop: '8px', marginBottom: '8px' }}>
+{`cd $REPO
+mvn compile
+mvn test`}
+          </pre>
+        </li>
+        <li>
+          <strong>Run it for real</strong> (needs RabbitMQ - see <code>TESTING_GUIDE.md</code> Tier
+          3 to start one). This runs directly against the compiled classes - no jar required:
+          <pre className="code-block" style={{ marginTop: '8px', marginBottom: '8px' }}>
+{`cd $REPO/user-defined-modules
+java -cp "target/classes:../ModuleRegistryLifecycleManager/lib/*" com.nis1.thesis.udm.Fail2banModule`}
+          </pre>
+        </li>
+        <li>
+          <strong>(Optional) Make it show up on the Modules page.</strong> This is a separate,
+          cosmetic step - the Modules page only lists modules with a <code>.jar</code> sitting
+          directly in <code>user-defined-modules/</code>, which has nothing to do with whether your
+          module actually runs (see the Troubleshooting tab):
+          <pre className="code-block" style={{ marginTop: '8px', marginBottom: '8px' }}>
+{`cd $REPO/user-defined-modules
+javac -cp "../nis-thesis-sdk/target/nis-thesis-sdk-1.0-SNAPSHOT.jar:../ModuleRegistryLifecycleManager/lib/json-20231013.jar:../ModuleRegistryLifecycleManager/lib/gson-2.13.1.jar:../ModuleRegistryLifecycleManager/lib/amqp-client-5.26.0.jar" \\
+  -d target/classes_tmp src/main/java/com/nis1/thesis/udm/Fail2banModule.java src/main/java/com/nis1/thesis/udm/Fail2banAlertData.java
+jar cf target/fail2ban-module.jar -C target/classes_tmp .
+cp target/fail2ban-module.jar .`}
+          </pre>
         </li>
       </ol>
 
@@ -96,8 +143,13 @@ const SdkOverview = () => {
           <code>CoreSystemApi</code>, <code>Event&lt;T&gt;</code>, and helper/data classes.
         </li>
         <li>
-          <strong>Patterns &amp; Examples:</strong> End-to-end examples like the Wazuh module,
-          mitigation flows, and enrichment patterns.
+          <strong>Patterns &amp; Examples:</strong> End-to-end examples like the standalone
+          Suricata/Maltrail/Fail2ban/Sysmon modules, the embedded OpenDaylight mitigation flow,
+          and enrichment patterns.
+        </li>
+        <li>
+          <strong>Common Mistakes &amp; Troubleshooting:</strong> Real gotchas found while building
+          this SDK, and fixes for the errors you're most likely to actually hit.
         </li>
         <li>
           <strong>SDK Detailed Context:</strong> The original full technical document that

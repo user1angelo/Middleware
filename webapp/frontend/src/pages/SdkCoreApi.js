@@ -209,6 +209,47 @@ const SdkCoreApi = () => {
         </tbody>
       </table>
 
+      <h3>Built-in Observability &amp; Testing Tools</h3>
+      <p>
+        Two tools ship with the SDK that most module authors will never call directly, but that
+        matter once you're trying to measure or debug a pipeline built on it.
+      </p>
+      <ul>
+        <li>
+          <code>com.nis1.thesis.sdk.telemetry.StageTimer</code> - automatic, always-on latency
+          instrumentation. You don't call this from your own module; it's already wired into the
+          core pipeline (<code>WorkflowQueueListener</code>, <code>WorkflowExecutor</code>,
+          <code>CommandRoutingListener</code>) and times every alert across 5 named stages:
+          <code>consume_deserialize</code>, <code>workflow_load</code>, <code>policy_match</code>,
+          <code>command_dispatch</code>, <code>registry_route_dispatch</code>. Each completed
+          stage appends one row to a CSV
+          (<code>benchmark_output/benchmark_run_&lt;date&gt;.csv</code>):
+          <pre className="code-block" style={{ marginTop: '8px', marginBottom: '8px' }}>
+{`traceId,stage,startTime,endTime,durationMs
+alert-1,consume_deserialize,2026-07-30 14:00:01.000,2026-07-30 14:00:01.005,5`}
+          </pre>
+          <code>startTime</code>/<code>endTime</code> are human-readable timestamps
+          (<code>yyyy-MM-dd HH:mm:ss.SSS</code>), not raw epoch milliseconds, so a row can be read
+          directly without converting it first; <code>durationMs</code> stays a plain integer
+          since it's what gets averaged/percentiled. Run
+          <code>python3 scripts/summarize_benchmark.py &lt;benchmark_output-dir&gt;</code> to get
+          per-stage and end-to-end latency statistics (mean/median/p95/max) across every alert
+          that passed through.
+        </li>
+        <li>
+          <code>WorkflowDryRunTool</code> (in <code>WorkflowEngine/</code>) - the tool you *do* run
+          yourself: checks whether a workflow YAML actually matches a given alert JSON, with no
+          RabbitMQ, ModuleRegistry, or live module needed.
+          <pre className="code-block" style={{ marginTop: '8px', marginBottom: '8px' }}>
+{`java -cp "lib/*:target/classes" WorkflowDryRunTool workflows/ransomware sample_alerts/maltrail_ransomware_alert.json`}
+          </pre>
+          Prints which workflows matched (or a hint about what to check if none did). Replaces
+          what used to be a throwaway <code>.java</code> file reinvented from scratch each time a
+          new workflow needed checking - see <code>TESTING_GUIDE.md</code>'s Tier 2 and
+          <code>SDK_USABILITY_AUDIT.md</code>'s Progressive Evaluation dimension.
+        </li>
+      </ul>
+
       <p style={{ marginTop: '16px' }}>
         For the full, evidence-based usability evaluation of this API (what it does well, what it
         doesn't, and why), see <code>SDK_USABILITY_AUDIT.md</code> at the repository root - it

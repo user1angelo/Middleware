@@ -3,6 +3,7 @@ import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import SdkOverview from './SdkOverview';
 import SdkCoreApi from './SdkCoreApi';
 import SdkPatterns from './SdkPatterns';
+import SdkTroubleshooting from './SdkTroubleshooting';
 
 const SdkDocs = () => {
   const location = useLocation();
@@ -10,7 +11,8 @@ const SdkDocs = () => {
   const subNav = [
     { path: '/sdk', label: 'Overview & Getting Started', exact: true },
     { path: '/sdk/core-api', label: 'Core API Reference' },
-    { path: '/sdk/patterns', label: 'Patterns & Examples' }
+    { path: '/sdk/patterns', label: 'Patterns & Examples' },
+    { path: '/sdk/troubleshooting', label: 'Common Mistakes & Troubleshooting' }
   ];
 
   return (
@@ -45,6 +47,7 @@ const SdkDocs = () => {
         <Route path="/" element={<SdkOverview />} />
         <Route path="/core-api" element={<SdkCoreApi />} />
         <Route path="/patterns" element={<SdkPatterns />} />
+        <Route path="/troubleshooting" element={<SdkTroubleshooting />} />
       </Routes>
     </div>
   );
