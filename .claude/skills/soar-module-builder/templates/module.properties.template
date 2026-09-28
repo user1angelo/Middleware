@@ -1,0 +1,31 @@
+# {{ToolName}}Module configuration
+
+# RabbitMQ / Message Bus
+rabbitmq.host=localhost
+rabbitmq.port=5672
+rabbitmq.user=user
+rabbitmq.password=password
+rabbitmq.workflow_queue=workflow_queue
+
+# {{ToolVendor}} source configuration
+# TODO: replace with the real key(s) this module's loadConfig() reads, matching whichever
+# ingestion template was used, e.g.:
+#   {{tool-name}}.log_path=/var/log/{{tool-name}}/{{tool-name}}.log      (file-tail variant)
+#   {{tool-name}}.udp_port=XXXX                                          (UDP variant)
+#   {{tool-name}}.http_port=XXXX                                         (HTTP variant)
+#   {{tool-name}}.http_path=/{{tool-name}}/alerts                        (HTTP variant)
+{{TOOL_SPECIFIC_KEYS}}
+
+# Module identity
+# IMPORTANT: module.id must match the config filename (without .properties)
+# so the web dashboard can correlate DB records with this config.
+module.id={{tool-name}}-module
+module.name={{ToolVendor}} UDM
+module.type={{module_type}}
+module.command_queue={{tool-name}}-module_commands_queue
+
+# Module capabilities (used for workflow routing)
+module.capabilities={{capabilities_csv}}
+
+# Heartbeat configuration (in seconds)
+module.heartbeat_interval=30
