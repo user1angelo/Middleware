@@ -48,12 +48,14 @@ public interface CoreSystemApi {
      * <p>
      * This is in-memory dispatch, not AMQP topic routing. Registered listeners are matched
      * against dispatched events in two ways only:
+     * </p>
      * <ul>
      *   <li>Exact match — {@code eventType} equals the event's {@code type} exactly.</li>
      *   <li>Single-level prefix wildcard — an {@code eventType} ending in {@code ".*"} (e.g.
      *       {@code "odl.*"}) matches any event type starting with that prefix (e.g.
      *       {@code "odl.host.isolate"}).</li>
      * </ul>
+     * <p>
      * Full AMQP topic algebra (multi-segment {@code #} wildcards, {@code *} matching a single
      * arbitrary segment anywhere in the pattern) is <strong>not</strong> supported.
      * </p>
