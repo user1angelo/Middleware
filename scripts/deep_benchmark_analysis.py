@@ -179,22 +179,57 @@ def run_one_batch(simulate_script, source, extra_args, watch_dirs, settle_second
         for line in result.stderr.strip().splitlines():
             log(f"    [stderr] {line}")
 
-    # Poll until CSV growth settles (no new rows for settle_seconds), capped at max_wait.
+    # Poll until this run's own data has actually finished arriving, capped at max_wait.
+    #
+    # A generic "no new CSV rows for settle_seconds" check is not enough:
+    # ModuleRegistryLifecycleManager processes commands one at a time, and each command
+    # routed to an unreachable target (e.g. a disconnected SDN controller) blocks for
+    # several seconds before it's logged. If that backlog is still draining when the
+    # quiet-period heuristic alone would already call the run "done", the trailing rows
+    # get captured by the NEXT run's watermark instead -- splitting one alert's data
+    # across two run files (confirmed happening in practice: traceIds whose
+    # command_dispatch rows land in run N but whose registry_route_dispatch rows land in
+    # run N+1). So in addition to the quiet-period check, track every alert seen in this
+    # run (via its consume_deserialize row, excluding "hb-"-prefixed heartbeat traceIds)
+    # and require that its registry_route_dispatch count has caught up to its
+    # command_dispatch count before the run is allowed to close.
     start = time.monotonic()
     last_count = total_row_count(watch_dirs)
     last_change = start
     while True:
         time.sleep(poll_interval)
-        now = total_row_count(watch_dirs)
+        new_rows = collect_new_rows(watch_dirs, watermark)
+        now = len(new_rows)
         elapsed = time.monotonic() - start
+
         if now != last_count:
             last_count = now
             last_change = time.monotonic()
+
+        seed_trace_ids = {
+            row["traceId"] for row in new_rows
+            if row["stage"] == "consume_deserialize" and not row["traceId"].startswith("hb-")
+        }
+        dispatch_counts = defaultdict(int)
+        route_counts = defaultdict(int)
+        for row in new_rows:
+            if row["stage"] == "command_dispatch":
+                dispatch_counts[row["traceId"]] += 1
+            elif row["stage"] == "registry_route_dispatch":
+                route_counts[row["traceId"]] += 1
+        pending = sorted(tid for tid in seed_trace_ids if dispatch_counts[tid] > route_counts[tid])
+
         quiet_for = time.monotonic() - last_change
-        if quiet_for >= settle_seconds:
+        if not pending and quiet_for >= settle_seconds:
             break
         if elapsed >= max_wait:
-            log(f"  WARNING: hit --max-wait ({max_wait}s) before settling; proceeding anyway")
+            if pending:
+                log(f"  WARNING: hit --max-wait ({max_wait}s) with {len(pending)} trace(s) still "
+                    f"dispatching (command_dispatch count > registry_route_dispatch count) -- "
+                    f"proceeding anyway; their data may be incomplete or may bleed into the next "
+                    f"run: {pending}")
+            else:
+                log(f"  WARNING: hit --max-wait ({max_wait}s) before settling; proceeding anyway")
             break
 
     new_rows = collect_new_rows(watch_dirs, watermark)
@@ -343,11 +378,14 @@ def main():
     parser.add_argument("--watch-dir", action="append", default=[], dest="watch_dirs",
                          help="benchmark_output directory to watch (repeatable); default: "
                               "WorkflowEngine/benchmark_output and ModuleRegistryLifecycleManager/benchmark_output")
-    parser.add_argument("--settle-seconds", type=float, default=4.0,
-                         help="consider a run done once no new CSV rows appear for this many seconds (default 4)")
+    parser.add_argument("--settle-seconds", type=float, default=5.0,
+                         help="extra quiet buffer (seconds) required after every seen trace's "
+                              "registry_route_dispatch count catches up to its command_dispatch "
+                              "count, before the run is considered done (default 5)")
     parser.add_argument("--poll-interval", type=float, default=1.0, help="CSV poll interval in seconds (default 1)")
-    parser.add_argument("--max-wait", type=float, default=60.0,
-                         help="give up waiting for a run to settle after this many seconds (default 60)")
+    parser.add_argument("--max-wait", type=float, default=90.0,
+                         help="give up waiting for a run to settle after this many seconds (default 90 -- "
+                              "a single alert can trigger several ~5.4s SDN-timeout dispatches serially)")
     parser.add_argument("--pause-between-runs", type=float, default=2.0,
                          help="extra pause (seconds) after one run settles before firing the next (default 2)")
     parser.add_argument("--out-dir", default=None,
