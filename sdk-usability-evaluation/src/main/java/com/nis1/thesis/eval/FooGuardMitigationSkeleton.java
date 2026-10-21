@@ -71,7 +71,7 @@ public class FooGuardMitigationSkeleton implements PluggableModule {
      * TODO-2 [Working Framework / Learning Style]: this is the module's startup hook - it's
      * called exactly once before the module is expected to be operational. Fill in:
      *   1. Store `api` and build a ModuleHelper from it (see OpenDaylightModule.initialize(),
-     *      first three lines).
+     *      first two lines).
      *   2. Construct firewallClient = new FooGuardFirewallClient(helper, getName()) (the stub
      *      class at the bottom of this file - it simulates enforcement so this compiles and runs
      *      without a real firewall, the same way OpenDaylightClient's RESTCONF calls are stubbed

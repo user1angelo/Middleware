@@ -78,7 +78,7 @@ public class FooGuardStandaloneSkeleton {
     // --- FooGuard Configuration -----------------------------------------------
 
     // TODO-1 [Working Framework]: this is currently hardcoded. Real modules (see
-    // Fail2banModule.FAIL2BAN_LOG_PATH / loadConfig()) read their tool-specific source path from
+    // SuricataModule.EVE_JSON_PATH / loadConfig()) read their tool-specific source path from
     // the .properties file, with this hardcoded value only as the fallback default. Fix
     // loadConfig() below (search for "TODO-1") to read a "foo.log_path" key from CONFIG_PATH.
     private static String FOOGUARD_LOG_PATH = "sample-data/foo.log";
